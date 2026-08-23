@@ -1,0 +1,23 @@
+# Локальная база SQLite (создаётся server.js автоматически)
+data/
+*.db
+*.db-journal
+*.sqlite
+
+# Зависимости
+node_modules/
+
+# Vercel
+.vercel
+
+# Логи и временные файлы
+*.log
+npm-debug.log*
+
+# ОС
+.DS_Store
+Thumbs.db
+
+# Редакторы
+.vscode/
+.idea/

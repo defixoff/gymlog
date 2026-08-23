@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="GymLog — автономный дневник тренировок: расписание, подходы, рекорды и прогресс.">
+<meta name="theme-color" content="#FF7A1A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GymLog">
+<title>GymLog — дневник тренировок</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="auth-mode">
+
+<!-- ЭКРАН ВХОДА / РЕГИСТРАЦИИ -->
+<div class="auth" id="authScreen">
+  <div class="auth-card">
+    <div class="auth-logo"><span class="brand-dot"></span>GymLog</div>
+    <p class="auth-sub">Дневник тренировок — ваш прогресс всегда с вами</p>
+    <div class="auth-tabs">
+      <button type="button" class="chip on" id="tabLogin">Вход</button>
+      <button type="button" class="chip" id="tabReg">Регистрация</button>
+    </div>
+    <form id="authForm">
+      <label class="field"><span>Логин</span>
+        <input id="aLogin" type="text" autocomplete="username" placeholder="латиница, цифры, . _ -" required>
+      </label>
+      <label class="field"><span>Пароль</span>
+        <input id="aPass" type="password" autocomplete="current-password" placeholder="••••••" required>
+      </label>
+      <div class="auth-error" id="authError"></div>
+      <button class="btn primary wide" id="authSubmit" type="submit">Войти</button>
+    </form>
+  </div>
+</div>
+
+<div class="layout">
+
+<aside class="sidebar">
+  <div class="brand"><span class="brand-dot"></span>GymLog</div>
+  <nav class="side-nav">
+    <button class="side-link" data-tab="home" type="button">
+      <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>
+      <span>Главная</span>
+    </button>
+    <button class="side-link" data-tab="schedule" type="button">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+      <span>План</span>
+    </button>
+    <button class="side-link" data-tab="workout" type="button">
+      <svg viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>
+      <span>Зал</span>
+    </button>
+    <button class="side-link" data-tab="profile" type="button">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/></svg>
+      <span>Профиль</span>
+    </button>
+  </nav>
+  <button id="themeBtnSide" class="icon-btn" type="button" aria-label="Сменить тему"></button>
+</aside>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand"><span class="brand-dot"></span>GymLog</div>
+    <button id="themeBtn" class="icon-btn" type="button" aria-label="Сменить тему"></button>
+  </header>
+
+  <main id="screens">
+
+    <!-- ГЛАВНЫЙ ЭКРАН -->
+    <section id="screen-home" class="screen">
+      <h1 id="homeHello" class="hello"></h1>
+      <div id="homeStats" class="stats"></div>
+      <div class="card">
+        <h2>Объём тренировок</h2>
+        <div id="volumeChart"></div>
+        <p class="hint">Суммарный тоннаж последних тренировок</p>
+      </div>
+      <div class="card">
+        <h2>🏆 Максимальные рекорды</h2>
+        <div id="records"></div>
+      </div>
+    </section>
+
+    <!-- РАСПИСАНИЕ -->
+    <section id="screen-schedule" class="screen">
+      <div class="screen-head">
+        <h1>Расписание</h1>
+        <button class="btn primary small" id="addDayBtn" type="button">+ День</button>
+      </div>
+      <div id="daysList"></div>
+    </section>
+
+    <!-- ТРЕНИРОВКА -->
+    <section id="screen-workout" class="screen">
+      <div id="workoutBox"></div>
+    </section>
+
+    <!-- ПРОФИЛЬ -->
+    <section id="screen-profile" class="screen">
+      <div class="screen-head"><h1>Профиль</h1></div>
+      <div class="card">
+        <label class="field"><span>Имя</span>
+          <input id="pName" type="text" placeholder="Как вас зовут?" maxlength="30" autocomplete="off">
+        </label>
+        <div class="grid2">
+          <label class="field"><span>Возраст</span>
+            <input id="pAge" type="number" min="5" max="120" placeholder="лет" inputmode="numeric">
+          </label>
+          <label class="field"><span>Вес, кг</span>
+            <input id="pWeight" type="number" min="20" max="300" step="0.1" placeholder="кг" inputmode="decimal">
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Динамика веса</h2>
+        <div id="weightChart"></div>
+      </div>
+      <div class="card" id="accountCard" hidden>
+        <h2>Аккаунт</h2>
+        <p class="hint" id="accountInfo"></p>
+        <button class="btn ghost" id="logoutBtn" type="button" style="width:100%">Выйти</button>
+      </div>
+      <div class="card">
+        <h2>Данные</h2>
+        <p class="hint" id="guestHint" hidden>Сервер не найден — приложение работает в гостевом режиме: данные хранятся локально на этом устройстве.</p>
+        <p class="hint">Кнопка ниже сотрёт локальные данные этого браузера.</p>
+        <button class="btn danger" id="resetBtn" type="button">Сбросить все данные</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+</div><!-- /layout -->
+
+<nav class="tabbar">
+  <button class="tab" data-tab="home" type="button">
+    <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>
+    <span>Главная</span>
+  </button>
+  <button class="tab" data-tab="schedule" type="button">
+    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+    <span>План</span>
+  </button>
+  <button class="tab" data-tab="workout" type="button">
+    <svg viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></svg>
+    <span>Зал</span>
+  </button>
+  <button class="tab" data-tab="profile" type="button">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/></svg>
+    <span>Профиль</span>
+  </button>
+</nav>
+
+<div class="sheet-backdrop" id="sheetBackdrop"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
