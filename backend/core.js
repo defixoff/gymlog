@@ -46,10 +46,13 @@ async function login(driver, loginName, password) {
 /* Единая точка входа: handle(driver, { method, path, body, token }) → { status, body } */
 async function handle(driver, { method, path, body = {}, token = '' }) {
   try {
-    if (driver.init) await driver.init();
     const route = method + ' ' + path.replace(/^\/?api\//, '');
 
+    // ping отвечает мгновенно, без подключения к БД — иначе холодный старт
+    // serverless-функции уводит фронтенд в гостевой режим
     if (route === 'GET ping') return ok({ ok: true });
+
+    if (driver.init) await driver.init();
     if (route === 'POST register') return await register(driver, body.login, body.password);
     if (route === 'POST login') return await login(driver, body.login, body.password);
     if (route === 'POST logout') {

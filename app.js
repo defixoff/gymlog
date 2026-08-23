@@ -81,7 +81,19 @@ const api = {
       return data;
     } finally { clearTimeout(t); }
   },
-  async ping() { try { await this.call('/ping'); return true; } catch { return false; } },
+  async ping() {
+    // две попытки с щедрым таймаутом: первый запрос может попасть в холодный
+    // старт serverless-функции, второй обычно идёт по тёплому инстансу
+    for (let i = 0; i < 2; i++) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const res = await fetch('/api/ping', { signal: ctrl.signal });
+        if (res.ok) return true;
+      } catch {} finally { clearTimeout(t); }
+    }
+    return false;
+  },
 };
 
 /* сохранение: всегда в локальный кэш; при работе с сервером — ещё и PUT (с дебаунсом) */
