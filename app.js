@@ -162,6 +162,52 @@ function sheet(title, fields, onOk, okText = 'Сохранить') {
   setTimeout(() => el.querySelector('input')?.focus(), 380);
 }
 
+/* ---------- подтверждение (тематическая замена confirm()) ---------- */
+function confirmSheet(text, onYes, yesText = 'Удалить') {
+  const el = $('#sheet'), bd = $('#sheetBackdrop');
+  el.innerHTML = `<div class="sheet-handle"></div><p class="confirm-text">${text}</p>
+    <div class="sheet-actions">
+      <button type="button" class="btn ghost" data-cancel>Отмена</button>
+      <button type="button" class="btn danger" data-yes>${yesText}</button>
+    </div>`;
+  const close = () => { el.classList.remove('open'); bd.classList.remove('open'); };
+  el.querySelector('[data-cancel]').onclick = close;
+  bd.onclick = close;
+  el.querySelector('[data-yes]').onclick = () => { close(); onYes(); };
+  el.classList.add('open'); bd.classList.add('open');
+}
+
+/* ---------- драг шторки за любую точку (кроме полей/кнопок) ---------- */
+function makeSheetDraggable() {
+  const el = $('#sheet'), bd = $('#sheetBackdrop');
+  let startY = 0, currentY = 0, dragging = false;
+
+  el.addEventListener('pointerdown', e => {
+    if (e.target.closest('input,button,form,select,textarea')) return;
+    dragging = true;
+    startY = e.clientY;
+    el.setPointerCapture(e.pointerId);
+    el.style.transition = 'none'; // на время драга — 1:1 без CSS-transition
+  });
+
+  el.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    currentY = Math.max(0, e.clientY - startY); // тянуть можно только вниз
+    el.style.transform = `translateY(${currentY}px)`;
+  });
+
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    el.style.transition = '';
+    if (currentY > 90) { el.classList.remove('open'); bd.classList.remove('open'); }
+    el.style.transform = '';
+    currentY = 0;
+  };
+  el.addEventListener('pointerup', endDrag);
+  el.addEventListener('pointercancel', endDrag);
+}
+
 /* ---------- графики (чистый SVG) ---------- */
 let gid = 0;
 function lineChart(vals, labels = [], unit = 'кг') {
@@ -361,9 +407,9 @@ function renderActive(box) {
     save(); renderWorkout();
   });
   $('#discardBtn').onclick = () => {
-    if (confirm('Отменить тренировку? Введённые подходы не сохранятся.')) {
+    confirmSheet('Отменить тренировку? Введённые подходы не сохранятся.', () => {
       S.active = null; save(); renderWorkout();
-    }
+    }, 'Отменить');
   };
   $('#finishBtn').onclick = () => {
     if (!a.sets.length) return toast('Добавьте хотя бы одну запись');
@@ -468,6 +514,7 @@ function go(name) {
 
 /* ---------- события ---------- */
 function bindEvents() {
+  makeSheetDraggable();
   $$('.tabbar [data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   $$('.sidebar [data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   addEventListener('hashchange', () => {
@@ -493,10 +540,11 @@ function bindEvents() {
     if (!d) return;
     const act = btn.dataset.act;
     if (act === 'delDay') {
-      if (!confirm(`Удалить «${d.name}»?`)) return;
-      S.days = S.days.filter(x => x !== d);
-      if (S.active?.dayId === d.id) S.active = null;
-      save(); renderSchedule();
+      confirmSheet(`Удалить «${d.name}»?`, () => {
+        S.days = S.days.filter(x => x !== d);
+        if (S.active?.dayId === d.id) S.active = null;
+        save(); renderSchedule();
+      });
     }
     if (act === 'renDay') sheet('Переименовать день', [{ name: 'name', label: 'Название', value: d.name, req: 1 }], r => {
       d.name = r.name.trim() || d.name; save(); renderSchedule();
@@ -519,9 +567,10 @@ function bindEvents() {
     const s = S.sessions.find(x => x.id === b.closest('.hist').dataset.id);
     if (!s) return;
     if (b.dataset.hist === 'del') {
-      if (!confirm(`Удалить тренировку «${s.name || s.dayName}»?`)) return;
-      S.sessions = S.sessions.filter(x => x !== s);
-      save(); renderWorkout(); toast('Тренировка удалена');
+      confirmSheet(`Удалить тренировку «${s.name || s.dayName}»?`, () => {
+        S.sessions = S.sessions.filter(x => x !== s);
+        save(); renderWorkout(); toast('Тренировка удалена');
+      });
     } else {
       sheet('Переименовать тренировку', [{ name: 'name', label: 'Название', value: s.name || s.dayName, req: 1 }], r => {
         s.name = r.name.trim() || s.name; save(); renderWorkout();
@@ -545,8 +594,9 @@ function bindEvents() {
     showAuth();
   };
   $('#resetBtn').onclick = () => {
-    if (!confirm('Удалить все данные и начать заново?')) return;
-    S = seed(); save(); applyTheme(); go('home'); toast('Данные сброшены');
+    confirmSheet('Удалить все данные и начать заново?', () => {
+      S = seed(); save(); applyTheme(); go('home'); toast('Данные сброшены');
+    });
   };
 }
 
