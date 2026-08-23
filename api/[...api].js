@@ -1,4 +1,3 @@
-
 /* Vercel serverless: единая точка для всех маршрутов /api/*.
    Использует PostgreSQL (переменная окружения DATABASE_URL).
    Таблицы создаются автоматически при первом запросе. */
@@ -8,8 +7,13 @@ const dbPostgres = require('../backend/db-postgres.js');
 let driver = null;
 
 module.exports = async function handler(req, res) {
-  console.log('[DEBUG]', JSON.stringify({ url: req.url, query: req.query, method: req.method }));
-  const parts = Array.isArray(req.query.api) ? req.query.api : [req.query.api].filter(Boolean);
+  // Путь разбираем напрямую из req.url, а не из req.query.api: на некоторых
+  // деплоях Vercel сама подстановка динамического catch-all параметра из
+  // имени файла [...api].js в req.query отдаёт param name с лишними точками
+  // ("...api" вместо "api"), из-за чего req.query.api оставался пустым и
+  // все запросы (включая /api/ping) уходили в "Не авторизован".
+  const rawPath = (req.url || '/').split('?')[0]; // отбрасываем query-string
+  const parts = rawPath.replace(/^\/?api\/?/, '').split('/').filter(Boolean);
   const path = '/api/' + parts.join('/');
 
   // Очищаем путь от возможной косой черты (слэша) на конце
