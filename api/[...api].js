@@ -1,3 +1,4 @@
+
 /* Vercel serverless: единая точка для всех маршрутов /api/*.
    Использует PostgreSQL (переменная окружения DATABASE_URL).
    Таблицы создаются автоматически при первом запросе. */
@@ -7,6 +8,8 @@ const dbPostgres = require('../backend/db-postgres.js');
 let driver = null;
 
 module.exports = async function handler(req, res) {
+  console.log('[DEBUG]', JSON.stringify({ url: req.url, query: req.query, method: req.method }));
+  const parts = Array.isArray(req.query.api) ? req.query.api : [req.query.api].filter(Boolean);
   const parts = Array.isArray(req.query.api) ? req.query.api : [req.query.api].filter(Boolean);
   const path = '/api/' + parts.join('/');
 
