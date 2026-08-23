@@ -50,7 +50,7 @@ body::before{
   background:radial-gradient(620px 320px at 100% 0%,var(--glow),transparent 70%);
 }
 
-.app{max-width:480px;margin:0 auto;padding:0 16px calc(110px + env(safe-area-inset-bottom))}
+.app{max-width:480px;width:100%;flex:1 1 auto;min-width:0;margin:0 auto;padding:0 16px calc(110px + env(safe-area-inset-bottom))}
 .layout{display:flex;justify-content:center;gap:0}
 
 /* ---------- боковое меню (ПК) ---------- */
