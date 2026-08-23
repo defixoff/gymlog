@@ -10,9 +10,11 @@ module.exports = async function handler(req, res) {
   const parts = Array.isArray(req.query.api) ? req.query.api : [req.query.api].filter(Boolean);
   const path = '/api/' + parts.join('/');
 
-  // ping отвечает мгновенно и без DATABASE_URL — фронтенд по нему определяет,
-  // что сервер жив (иначе холодный старт уводит приложение в гостевой режим)
-  if (req.method === 'GET' && path === '/api/ping') {
+  // Очищаем путь от возможной косой черты (слэша) на конце
+  const cleanPath = path.replace(/\/$/, ''); 
+
+  // Проверка ping теперь защищена от лишних слэшей и параметров
+  if (req.method === 'GET' && (cleanPath === '/api/ping' || parts[0] === 'ping')) {
     return res.status(200).json({ ok: true });
   }
 
