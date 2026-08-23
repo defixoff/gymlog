@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.vercel.gymlog_one_inky.twa",
+        "sha256_cert_fingerprints": ["61:14:86:91:DB:60:5B:DD:AF:91:81:16:7D:C6:1D:2E:8C:3B:AF:DB:C8:5D:1B:42:70:7E:E3:26:82:9E:48:57"]
+      }
+    }]
