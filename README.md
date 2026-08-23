@@ -18,17 +18,29 @@
   и плашка «Максимальные рекорды» (лучший вес + оценка 1RM по формуле Эпли).
 - **PWA** — `manifest.json` + `sw.js`: установка на домашний экран и работа офлайн.
 
-## Запуск локально (SQLite, ноль зависимостей)
+## Запуск локально
 
-Требуется только Node.js ≥ 22 (встроенный `node:sqlite`, ничего ставить не надо):
+Требуется Node.js ≥ 22.
+
+**Вариант 1 — SQLite (ноль зависимостей):**
 
 ```bash
 node server.js
-# → http://localhost:3000
+# → http://localhost:3000, база: data/gymlog.db
 ```
 
-База создаётся автоматически в `data/gymlog.db` (в git не попадает).
-Зарегистрируйте пользователя — и все тренировки хранятся в SQLite.
+**Вариант 2 — PostgreSQL (например, Neon):** создайте `.env.local` в корне
+(файл в `.gitignore`, в git не попадает):
+
+```
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require
+```
+
+затем `npm install` (ставится только `pg`) и `node server.js` — сервер сам
+выберет PostgreSQL. Проверка соединения: `node test-db.js`.
+
+База создаётся автоматически (таблицы `users`, `sessions`, `states`).
+Зарегистрируйте пользователя — и все тренировки хранятся в базе.
 
 Если открыть приложение без сервера (любой статический хостинг, `npx serve .`,
 даже `file://`), оно стартует в **гостевом режиме** на localStorage — ничего
@@ -41,15 +53,16 @@ node server.js
 ```
 backend/core.js        — логика API (auth + состояние), не знает про СУБД
 backend/db-sqlite.js   — драйвер SQLite (локально, node:sqlite)
-backend/db-postgres.js — драйвер PostgreSQL (деплой)
-server.js              — локальный сервер: статика + /api/* на SQLite
+backend/db-postgres.js — драйвер PostgreSQL (локально через .env.local и на Vercel)
+server.js              — локальный сервер: статика + /api/* (Postgres или SQLite)
 api/[...api].js        — Vercel serverless: те же маршруты на PostgreSQL
 ```
 
 Маршруты API: `POST /api/register`, `POST /api/login`, `POST /api/logout`,
 `GET /api/me`, `GET /api/state`, `PUT /api/state`, `GET /api/ping`.
 Пароли хешируются scrypt + соль, сессии — токены на 30 дней.
-Смоук-тест API: `node test-api.js` (при запущенном `server.js`).
+Тесты: `node test-api.js` (смоук-тест API при запущенном `server.js`),
+`node test-db.js` (проверка соединения с PostgreSQL).
 
 Фронтенд при старте делает `GET /api/ping`:
 - сервер есть → экран входа, данные пользователя в базе;
@@ -60,11 +73,9 @@ api/[...api].js        — Vercel serverless: те же маршруты на Po
 1. Закоммитьте проект и загрузите в репозиторий (GitHub/GitLab):
 
    ```bash
-   git init
    git add .
    git commit -m "GymLog"
-   git remote add origin <url-репозитория>
-   git push -u origin main
+   git push
    ```
 
 2. В Vercel: **Add New → Project** → импорт репозитория.
@@ -79,7 +90,7 @@ api/[...api].js        — Vercel serverless: те же маршруты на Po
    при первом запросе к API.
 
 Статика раздаётся как есть, `/api/*` работает как serverless-функции.
-Локальная SQLite-база на деплой не попадает (см. `.gitignore`).
+Локальная SQLite-база и `.env.local` на деплой не попадают (см. `.gitignore`).
 
 ## Структура проекта
 
@@ -87,9 +98,10 @@ api/[...api].js        — Vercel serverless: те же маршруты на Po
 gymlog/
 ├── index.html, styles.css, app.js   # фронтенд
 ├── manifest.json, sw.js, icons/     # PWA
-├── server.js                        # локальный сервер (SQLite)
+├── server.js                        # локальный сервер (Postgres или SQLite)
 ├── backend/                         # общий API + драйверы БД
 ├── api/[...api].js                  # Vercel serverless (PostgreSQL)
 ├── test-api.js                      # смоук-тест API
+├── test-db.js                       # проверка соединения с PostgreSQL
 └── package.json, vercel.json, .gitignore
 ```

@@ -1,18 +1,39 @@
 'use strict';
-/* Локальный сервер GymLog: статика + API на SQLite.
-   Ноль npm-зависимостей (node:http + встроенный node:sqlite, Node ≥ 22).
+/* Локальный сервер GymLog: статика + API.
+   Ноль обязательных зависимостей (node:http + встроенный node:sqlite, Node ≥ 22).
 
-   Запуск:  node server.js   →   http://localhost:3000
-   База:    data/gymlog.db (создаётся автоматически)             */
+   Выбор базы:
+   • есть DATABASE_URL (в .env.local или окружении) → PostgreSQL (нужен npm i pg)
+   • нет → SQLite в data/gymlog.db
+
+   Запуск:  node server.js   →   http://localhost:3000 */
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./backend/core.js');
-const dbSqlite = require('./backend/db-sqlite.js');
+
+/* --- загрузка .env.local (простой парсер, без зависимостей) --- */
+try {
+  const envText = fs.readFileSync(path.join(__dirname, '.env.local'), 'utf8');
+  for (const line of envText.split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2];
+  }
+} catch {}
+
+/* --- выбор драйвера БД --- */
+let driver, dbLabel;
+if (process.env.DATABASE_URL) {
+  driver = require('./backend/db-postgres.js').create(process.env.DATABASE_URL);
+  dbLabel = 'PostgreSQL (DATABASE_URL)';
+} else {
+  driver = require('./backend/db-sqlite.js')
+    .create(process.env.GYMLOG_DB || path.join(__dirname, 'data', 'gymlog.db'));
+  dbLabel = 'SQLite (data/gymlog.db)';
+}
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
-const driver = dbSqlite.create(process.env.GYMLOG_DB || path.join(__dirname, 'data', 'gymlog.db'));
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -65,4 +86,4 @@ http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
     res.end(data);
   });
-}).listen(PORT, () => console.log(`GymLog: http://localhost:${PORT}  (база: data/gymlog.db)`));
+}).listen(PORT, () => console.log(`GymLog: http://localhost:${PORT}  (база: ${dbLabel})`));
