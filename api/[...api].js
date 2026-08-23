@@ -10,7 +10,6 @@ let driver = null;
 module.exports = async function handler(req, res) {
   console.log('[DEBUG]', JSON.stringify({ url: req.url, query: req.query, method: req.method }));
   const parts = Array.isArray(req.query.api) ? req.query.api : [req.query.api].filter(Boolean);
-  const parts = Array.isArray(req.query.api) ? req.query.api : [req.query.api].filter(Boolean);
   const path = '/api/' + parts.join('/');
 
   // Очищаем путь от возможной косой черты (слэша) на конце
