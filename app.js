@@ -30,6 +30,7 @@ const ICONS = {
   check: '<svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg>',
   moon : '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>',
   sun  : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M19.4 4.6l-1.8 1.8M6.4 17.6l-1.8 1.8"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
 };
 
 /* ---------- данные ---------- */
@@ -177,13 +178,45 @@ function confirmSheet(text, onYes, yesText = 'Удалить') {
   el.classList.add('open'); bd.classList.add('open');
 }
 
+/* ---------- детали тренировки (read-only шторка) ---------- */
+function sessionSheet(s) {
+  const el = $('#sheet'), bd = $('#sheetBackdrop');
+  const byEx = new Map();
+  for (const q of s.sets) {
+    if (!byEx.has(q.name)) byEx.set(q.name, []);
+    byEx.get(q.name).push(q);
+  }
+  const setsN = s.sets.reduce((a, q) => a + setCount(q), 0);
+  el.innerHTML = `<div class="sheet-handle"></div>
+    <h3>${esc(s.name || s.dayName || 'Тренировка')}</h3>
+    <p class="sheet-sub">${human(s.date)}${s.dayName ? ' · ' + esc(s.dayName) : ''} · ${setsN} подходов · ${fmt(sumVol(s))} кг</p>
+    <div class="sheet-scroll">${[...byEx].map(([name, qs]) => `
+      <div class="detail-ex">
+        <div class="detail-name">${esc(name)}</div>
+        ${qs.map(q => `
+          <div class="detail-set">
+            <span class="detail-dot"></span>
+            <span>${setCount(q)} × ${fmt(q.w)} кг × ${q.r} повт.</span>
+            <b>${fmt(setCount(q) * (+q.w || 0) * (+q.r || 0))} кг</b>
+          </div>`).join('')}
+      </div>`).join('')}
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn ghost" data-cancel>Закрыть</button>
+    </div>`;
+  const close = () => { el.classList.remove('open'); bd.classList.remove('open'); };
+  el.querySelector('[data-cancel]').onclick = close;
+  bd.onclick = close;
+  el.classList.add('open'); bd.classList.add('open');
+}
+
 /* ---------- драг шторки за любую точку (кроме полей/кнопок) ---------- */
 function makeSheetDraggable() {
   const el = $('#sheet'), bd = $('#sheetBackdrop');
   let startY = 0, currentY = 0, dragging = false;
 
   el.addEventListener('pointerdown', e => {
-    if (e.target.closest('input,button,form,select,textarea')) return;
+    if (e.target.closest('input,button,form,select,textarea,.sheet-scroll')) return;
     dragging = true;
     startY = e.clientY;
     el.setPointerCapture(e.pointerId);
@@ -207,6 +240,39 @@ function makeSheetDraggable() {
   el.addEventListener('pointerup', endDrag);
   el.addEventListener('pointercancel', endDrag);
 }
+
+/* ---------- прокрутка рядов чипсов: колесо и драг мышью (десктоп) ---------- */
+document.addEventListener('wheel', e => {
+  const c = e.target.closest('.chips');
+  if (!c || c.scrollWidth <= c.clientWidth) return;
+  if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+    c.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }
+}, { passive: false });
+
+(function chipsMouseDrag() {
+  let el = null, startX = 0, startLeft = 0, moved = false;
+  document.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse') return;
+    const c = e.target.closest('.chips');
+    if (!c || c.scrollWidth <= c.clientWidth) return;
+    el = c; moved = false; startX = e.clientX; startLeft = c.scrollLeft;
+  });
+  document.addEventListener('pointermove', e => {
+    if (!el) return;
+    const dx = e.clientX - startX;
+    if (Math.abs(dx) > 4) moved = true;
+    if (moved) el.scrollLeft = startLeft - dx;
+  });
+  const up = () => {
+    if (el && moved) // после прокрутки клик не должен выбирать чип
+      el.addEventListener('click', ev => ev.stopPropagation(), { capture: true, once: true });
+    el = null; moved = false;
+  };
+  document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', up);
+})();
 
 /* ---------- графики (чистый SVG) ---------- */
 let gid = 0;
@@ -275,6 +341,100 @@ function renderHome() {
     : '<div class="empty">Завершите первую тренировку —<br>рекорды появятся здесь</div>';
 }
 
+/* ---------- аналитика ---------- */
+let anDayId = null;    // выбранный день расписания
+let anExId = null;     // выбранное упражнение
+let anMetric = 'w';    // 'w' — максимальный вес, 'v' — объём за тренировку
+
+/* все тренировки, где встречалось упражнение (по дате, по возрастанию) */
+function exHistory(exName) {
+  const rows = [];
+  for (const s of S.sessions) {
+    const qs = s.sets.filter(q => q.name === exName);
+    if (!qs.length) continue;
+    rows.push({
+      s, qs,
+      maxW: Math.max(...qs.map(q => +q.w || 0)),
+      vol: qs.reduce((a, q) => a + setCount(q) * (+q.w || 0) * (+q.r || 0), 0),
+    });
+  }
+  rows.sort((a, b) => a.s.date < b.s.date ? -1 : a.s.date > b.s.date ? 1 : 0);
+  return rows;
+}
+
+function renderAnalytics() {
+  const box = $('#analyticsBox');
+  const prevScroll = $$('#analyticsBox .chips').map(c => c.scrollLeft);
+  if (!S.days.length) {
+    box.innerHTML = '<div class="empty">Сначала создайте день в расписании —<br>аналитика появится здесь</div>';
+    return;
+  }
+  const day = S.days.find(d => d.id === anDayId) || S.days[0];
+  anDayId = day.id;
+  const ex = day.exercises.find(e => e.id === anExId) || day.exercises[0] || null;
+  anExId = ex ? ex.id : null;
+
+  const rows = ex ? exHistory(ex.name) : [];
+  const best = rows.reduce((m, r) => Math.max(m, r.maxW), 0);
+  const totalVol = rows.reduce((a, r) => a + r.vol, 0);
+  const last = rows.at(-1);
+
+  const chartVals = rows.map(r => anMetric === 'w' ? r.maxW : r.vol);
+  const chart = rows.length
+    ? lineChart(chartVals, rows.map(r => human(r.s.date)))
+    : '<div class="empty">Пока нет данных —<br>выполните это упражнение на тренировке</div>';
+
+  box.innerHTML = `
+    <div class="card an-picker">
+      <div class="sect-inline">День</div>
+      <div class="chips">${S.days.map(d =>
+        `<button class="chip ${d.id === day.id ? 'on' : ''}" data-anday="${d.id}" type="button">${esc(d.name)}</button>`).join('')}
+      </div>
+      ${day.exercises.length ? `
+        <div class="sect-inline">Упражнение</div>
+        <div class="chips">${day.exercises.map(e =>
+          `<button class="chip ${e.id === anExId ? 'on' : ''}" data-anex="${e.id}" type="button">${esc(e.name)}</button>`).join('')}
+        </div>
+        <div class="sect-inline">Показатель</div>
+        <div class="chips">
+          <button class="chip ${anMetric === 'w' ? 'on' : ''}" data-anmetric="w" type="button">Макс. вес</button>
+          <button class="chip ${anMetric === 'v' ? 'on' : ''}" data-anmetric="v" type="button">Объём</button>
+        </div>`
+      : '<div class="empty">В этом дне нет упражнений —<br>добавьте их в расписании</div>'}
+    </div>
+    <div class="an-cols">
+      <div class="an-col">
+        <div class="card an-chart">
+          <h2>${ex ? esc(ex.name) : 'Динамика'}</h2>
+          ${chart}
+          ${rows.length ? `
+            <div class="stats an-stats">
+              <div class="stat"><div class="stat-v">${fmt(best)}</div><div class="stat-l">лучший вес, кг</div></div>
+              <div class="stat"><div class="stat-v">${rows.length}</div><div class="stat-l">тренировок</div></div>
+              <div class="stat"><div class="stat-v">${totalVol >= 1000 ? (totalVol / 1000).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) : fmt(totalVol)}</div>
+                <div class="stat-l">${totalVol >= 1000 ? 'тоннаж, т' : 'объём, кг'}</div></div>
+            </div>
+            <p class="hint">${anMetric === 'w' ? 'Максимальный вес на каждой тренировке' : 'Суммарный объём упражнения за тренировку'} · нажатие на точку покажет дату</p>` : ''}
+        </div>
+      </div>
+      <div class="an-col">
+        <div class="sect">История</div>
+        ${rows.length ? rows.slice().reverse().map((r, i) => `
+          <div class="hist an-hist" data-session="${r.s.id}" style="--i:${i}">
+            <div class="hist-info">
+              <b>${human(r.s.date)} · ${esc(r.s.name || r.s.dayName)}</b>
+              <div class="hist-sub">${r.qs.map(q => `${setCount(q)}×${fmt(q.w)}×${q.r}`).join(' · ')}</div>
+            </div>
+            <div class="hist-vol">${fmt(anMetric === 'w' ? r.maxW : r.vol)} кг</div>
+            <span class="hist-go">${ICONS.chevron}</span>
+          </div>`).join('')
+        : '<div class="empty">История пуста</div>'}
+      </div>
+    </div>`;
+  // выбор чипса перерисовывает экран — не сбрасываем горизонтальную прокрутку
+  $$('#analyticsBox .chips').forEach((c, i) => { if (prevScroll[i]) c.scrollLeft = prevScroll[i]; });
+}
+
 /* ---------- расписание ---------- */
 function renderSchedule() {
   $('#daysList').innerHTML = S.days.map(d => `
@@ -327,6 +487,7 @@ function renderWorkout() {
           <button class="icon-btn sm" data-hist="ren" type="button" aria-label="Переименовать">${ICONS.pen}</button>
           <button class="icon-btn sm" data-hist="del" type="button" aria-label="Удалить">${ICONS.trash}</button>
         </div>
+        <span class="hist-go">${ICONS.chevron}</span>
       </div>`).join('') || '<div class="empty">История пуста</div>'}`;
 
   $('#startBtn').onclick = () => {
@@ -498,8 +659,8 @@ function bindAuth() {
 }
 
 /* ---------- роутер ---------- */
-const screens = ['home', 'schedule', 'workout', 'profile'];
-const render = { home: renderHome, schedule: renderSchedule, workout: renderWorkout, profile: renderProfile };
+const screens = ['home', 'analytics', 'schedule', 'workout', 'profile'];
+const render = { home: renderHome, analytics: renderAnalytics, schedule: renderSchedule, workout: renderWorkout, profile: renderProfile };
 
 function go(name) {
   screens.forEach(n => {
@@ -560,21 +721,43 @@ function bindEvents() {
     }
   });
 
-  // история тренировок: переименование и удаление
+  // история тренировок: просмотр, переименование и удаление
   $('#workoutBox').addEventListener('click', ev => {
     const b = ev.target.closest('[data-hist]');
-    if (!b) return;
-    const s = S.sessions.find(x => x.id === b.closest('.hist').dataset.id);
-    if (!s) return;
-    if (b.dataset.hist === 'del') {
-      confirmSheet(`Удалить тренировку «${s.name || s.dayName}»?`, () => {
-        S.sessions = S.sessions.filter(x => x !== s);
-        save(); renderWorkout(); toast('Тренировка удалена');
-      });
-    } else {
-      sheet('Переименовать тренировку', [{ name: 'name', label: 'Название', value: s.name || s.dayName, req: 1 }], r => {
-        s.name = r.name.trim() || s.name; save(); renderWorkout();
-      });
+    if (b) {
+      const s = S.sessions.find(x => x.id === b.closest('.hist').dataset.id);
+      if (!s) return;
+      if (b.dataset.hist === 'del') {
+        confirmSheet(`Удалить тренировку «${s.name || s.dayName}»?`, () => {
+          S.sessions = S.sessions.filter(x => x !== s);
+          save(); renderWorkout(); toast('Тренировка удалена');
+        });
+      } else {
+        sheet('Переименовать тренировку', [{ name: 'name', label: 'Название', value: s.name || s.dayName, req: 1 }], r => {
+          s.name = r.name.trim() || s.name; save(); renderWorkout();
+        });
+      }
+      return;
+    }
+    const h = ev.target.closest('.hist[data-id]');
+    if (h) {
+      const s = S.sessions.find(x => x.id === h.dataset.id);
+      if (s) sessionSheet(s);
+    }
+  });
+
+  // аналитика: выбор дня, упражнения, показателя; история — детали тренировки
+  $('#analyticsBox').addEventListener('click', ev => {
+    const dayChip = ev.target.closest('[data-anday]');
+    if (dayChip) { anDayId = dayChip.dataset.anday; anExId = null; renderAnalytics(); return; }
+    const exChip = ev.target.closest('[data-anex]');
+    if (exChip) { anExId = exChip.dataset.anex; renderAnalytics(); return; }
+    const m = ev.target.closest('[data-anmetric]');
+    if (m) { anMetric = m.dataset.anmetric; renderAnalytics(); return; }
+    const h = ev.target.closest('[data-session]');
+    if (h) {
+      const s = S.sessions.find(x => x.id === h.dataset.session);
+      if (s) sessionSheet(s);
     }
   });
 
@@ -617,7 +800,7 @@ function bindEvents() {
     // сервера нет (просто статика) → гостевой режим, всё локально
     mode = 'guest';
     document.body.classList.remove('auth-mode');
-    go(['home', 'schedule', 'workout', 'profile'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
+    go(screens.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
   }
 })();
 

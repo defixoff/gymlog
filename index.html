@@ -48,6 +48,10 @@
       <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>
       <span>Главная</span>
     </button>
+    <button class="side-link" data-tab="analytics" type="button">
+      <svg viewBox="0 0 24 24"><path d="M22 7l-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></svg>
+      <span>Аналитика</span>
+    </button>
     <button class="side-link" data-tab="schedule" type="button">
       <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
       <span>План</span>
@@ -86,6 +90,12 @@
         <h2>🏆 Максимальные рекорды</h2>
         <div id="records"></div>
       </div>
+    </section>
+
+    <!-- АНАЛИТИКА -->
+    <section id="screen-analytics" class="screen">
+      <div class="screen-head"><h1>Аналитика</h1></div>
+      <div id="analyticsBox"></div>
     </section>
 
     <!-- РАСПИСАНИЕ -->
@@ -144,6 +154,10 @@
   <button class="tab" data-tab="home" type="button">
     <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>
     <span>Главная</span>
+  </button>
+  <button class="tab" data-tab="analytics" type="button">
+    <svg viewBox="0 0 24 24"><path d="M22 7l-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></svg>
+    <span>Аналитика</span>
   </button>
   <button class="tab" data-tab="schedule" type="button">
     <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>

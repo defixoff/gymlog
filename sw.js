@@ -1,5 +1,5 @@
 /* GymLog service worker — полная автономность в зале без сети */
-const CACHE = 'gymlog-v5';
+const CACHE = 'gymlog-v7';
 const ASSETS = [
   './',
   './index.html',
