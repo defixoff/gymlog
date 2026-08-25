@@ -51,10 +51,17 @@ const seed = () => ({
 });
 
 /* локальный кэш (гостевой режим + офлайн-копия состояния) */
+const normState = s => {
+  s.profile = s.profile || { name: '', age: '', weight: '' };
+  s.days = s.days || [];
+  s.sessions = s.sessions || [];
+  s.weightLog = s.weightLog || [];
+  return s;
+};
 const DB = {
   key: 'gymlog.v1',
   load() {
-    try { const s = JSON.parse(localStorage.getItem(this.key)); return s && s.days && s.profile ? s : seed(); }
+    try { const s = JSON.parse(localStorage.getItem(this.key)); return normState(s && s.days && s.profile ? s : seed()); }
     catch { return seed(); }
   },
   save() { try { localStorage.setItem(this.key, JSON.stringify(S)); } catch {} },
@@ -137,6 +144,9 @@ function toast(msg) {
   toastT = setTimeout(() => t.classList.remove('show'), 2200);
 }
 
+/* ---------- хаптик-отклик (мобильные, только ключевые события) ---------- */
+const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch {} };
+
 /* ---------- шторка ---------- */
 function sheet(title, fields, onOk, okText = 'Сохранить') {
   const el = $('#sheet'), bd = $('#sheetBackdrop');
@@ -210,32 +220,42 @@ function sessionSheet(s) {
   el.classList.add('open'); bd.classList.add('open');
 }
 
-/* ---------- драг шторки за любую точку (кроме полей/кнопок) ---------- */
+/* ---------- драг шторки: 1:1 за пальцем, velocity, rubber-band ---------- */
+/* прогрессивное сопротивление за границей, как в iOS */
+const rubberband = (d, dim = 120, c = 0.55) => (d * dim * c) / (dim + c * Math.abs(d));
+
 function makeSheetDraggable() {
   const el = $('#sheet'), bd = $('#sheetBackdrop');
-  let startY = 0, currentY = 0, dragging = false;
+  let startY = 0, lastY = 0, lastT = 0, vel = 0, dragging = false;
 
   el.addEventListener('pointerdown', e => {
     if (e.target.closest('input,button,form,select,textarea,.sheet-scroll')) return;
     dragging = true;
-    startY = e.clientY;
+    startY = lastY = e.clientY; lastT = performance.now(); vel = 0;
     el.setPointerCapture(e.pointerId);
     el.style.transition = 'none'; // на время драга — 1:1 без CSS-transition
   });
 
   el.addEventListener('pointermove', e => {
     if (!dragging) return;
-    currentY = Math.max(0, e.clientY - startY); // тянуть можно только вниз
-    el.style.transform = `translateY(${currentY}px)`;
+    const now = performance.now(), dt = now - lastT;
+    if (dt > 0) vel = 0.8 * vel + 0.2 * ((e.clientY - lastY) / dt); // px/ms, сглаженно
+    lastY = e.clientY; lastT = now;
+    const dy = e.clientY - startY;
+    // вниз — 1:1 за пальцем, вверх — мягкое сопротивление
+    el.style.transform = `translateY(${dy >= 0 ? dy : -rubberband(-dy)}px)`;
   });
 
   const endDrag = () => {
     if (!dragging) return;
     dragging = false;
     el.style.transition = '';
-    if (currentY > 90) { el.classList.remove('open'); bd.classList.remove('open'); }
+    const dy = lastY - startY;
+    if (performance.now() - lastT > 100) vel = 0; // палец замер перед отпусканием — флика нет
+    // решение по скорости: быстрый флик вниз закрывает даже с малого смещения
+    if (vel > 0.5 || dy > 90) { el.classList.remove('open'); bd.classList.remove('open'); }
     el.style.transform = '';
-    currentY = 0;
+    vel = 0;
   };
   el.addEventListener('pointerup', endDrag);
   el.addEventListener('pointercancel', endDrag);
@@ -285,14 +305,24 @@ function lineChart(vals, labels = [], unit = 'кг') {
   const pts = vals.map((v, i) => [+X(i).toFixed(1), +Y(v).toFixed(1)]);
   const line = pts.map((pt, i) => (i ? 'L' : 'M') + pt[0] + ' ' + pt[1]).join(' ');
   const area = line + ` L ${pts.at(-1)[0]} ${h - 4} L ${pts[0][0]} ${h - 4} Z`;
+  const grid = [0.25, 0.5, 0.75].map(t => {
+    const y = +(p + t * (h - 2 * p)).toFixed(1);
+    return `<line class="grid" x1="${p}" y1="${y}" x2="${w - p}" y2="${y}"/>`;
+  }).join('');
+  const marks = max > min ? `
+    <text class="mark" x="3" y="10">${fmt(max)}</text>
+    <text class="mark" x="3" y="${h - 4}">${fmt(min)}</text>` : '';
   return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img">
     <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/>
       <stop offset="1" stop-color="var(--accent)" stop-opacity="0"/>
     </linearGradient></defs>
+    ${grid}
     <path d="${area}" fill="url(#${id})"/>
     <path d="${line}" class="line"/>
-    ${pts.map((pt, i) => `<circle class="dot" style="--i:${i}" cx="${pt[0]}" cy="${pt[1]}" r="3.2">
+    ${marks}
+    ${pts.map((pt, i) => `<circle class="dot" style="--i:${i}" cx="${pt[0]}" cy="${pt[1]}" r="3.5"
+      data-tip="${esc(labels[i] || '')} — ${fmt(vals[i])} ${unit}">
       <title>${labels[i] || ''} — ${fmt(vals[i])} ${unit}</title></circle>`).join('')}
   </svg>`;
 }
@@ -414,7 +444,7 @@ function renderAnalytics() {
               <div class="stat"><div class="stat-v">${totalVol >= 1000 ? (totalVol / 1000).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) : fmt(totalVol)}</div>
                 <div class="stat-l">${totalVol >= 1000 ? 'тоннаж, т' : 'объём, кг'}</div></div>
             </div>
-            <p class="hint">${anMetric === 'w' ? 'Максимальный вес на каждой тренировке' : 'Суммарный объём упражнения за тренировку'} · нажатие на точку покажет дату</p>` : ''}
+            <p class="hint">${anMetric === 'w' ? 'Максимальный вес на каждой тренировке' : 'Суммарный объём упражнения за тренировку'} · нажмите на точку для деталей</p>` : ''}
         </div>
       </div>
       <div class="an-col">
@@ -580,6 +610,7 @@ function renderActive(box) {
       dayId: a.dayId, dayName: day ? day.name : '', date: a.date, sets: a.sets,
     });
     S.active = null; save();
+    buzz([12, 40, 18]);
     toast('Тренировка сохранена 💪');
     go('home');
   };
@@ -618,10 +649,10 @@ async function enterServer() {
   const me = await api.call('/me');
   userLogin = me.login;
   const { state } = await api.call('/state');
-  S = state && state.days && state.profile ? state : DB.load(); // пустой аккаунт → подхватываем локальные данные
+  S = normState(state && state.days && state.profile ? state : DB.load()); // пустой аккаунт → подхватываем локальные данные
   applyTheme();
   document.body.classList.remove('auth-mode');
-  go('home');
+  go(screens.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
   if (!state) save(); // сразу зальём стартовое состояние на сервер
 }
 
@@ -676,6 +707,13 @@ function go(name) {
 /* ---------- события ---------- */
 function bindEvents() {
   makeSheetDraggable();
+
+  // тап по точке графика — показать значение
+  document.addEventListener('click', e => {
+    const dot = e.target.closest('.chart .dot');
+    if (dot && dot.dataset.tip) toast(dot.dataset.tip);
+  });
+
   $$('.tabbar [data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   $$('.sidebar [data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   addEventListener('hashchange', () => {
@@ -730,7 +768,7 @@ function bindEvents() {
       if (b.dataset.hist === 'del') {
         confirmSheet(`Удалить тренировку «${s.name || s.dayName}»?`, () => {
           S.sessions = S.sessions.filter(x => x !== s);
-          save(); renderWorkout(); toast('Тренировка удалена');
+          save(); renderWorkout(); buzz(12); toast('Тренировка удалена');
         });
       } else {
         sheet('Переименовать тренировку', [{ name: 'name', label: 'Название', value: s.name || s.dayName, req: 1 }], r => {
