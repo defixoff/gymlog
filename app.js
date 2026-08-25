@@ -31,6 +31,7 @@ const ICONS = {
   moon : '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>',
   sun  : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M19.4 4.6l-1.8 1.8M6.4 17.6l-1.8 1.8"/></svg>',
   chevron: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+  crown: '<svg viewBox="0 0 24 24"><path d="M3.5 8.2l4.4 3.6L12 5.6l4.1 6.2 4.4-3.6-1.7 10.2H5.2z"/></svg>',
 };
 
 /* ---------- данные ---------- */
@@ -365,9 +366,12 @@ function lineChart(vals, labels = [], unit = 'кг') {
     <path d="${area}" fill="url(#${id})"/>
     <path d="${line}" class="line"/>
     ${marks}
-    ${pts.map((pt, i) => `<circle class="dot" style="--i:${i}" cx="${pt[0]}" cy="${pt[1]}" r="3.5"
-      data-tip="${esc(labels[i] || '')} — ${fmt(vals[i])} ${unit}">
-      <title>${labels[i] || ''} — ${fmt(vals[i])} ${unit}</title></circle>`).join('')}
+    ${pts.map((pt, i) => `<g class="dot-g" style="--i:${i}">
+      <circle class="dot" cx="${pt[0]}" cy="${pt[1]}" r="3.5"/>
+      <circle class="dot-hit" cx="${pt[0]}" cy="${pt[1]}" r="12"
+        data-tip="${esc(labels[i] || '')} — ${fmt(vals[i])} ${unit}">
+        <title>${labels[i] || ''} — ${fmt(vals[i])} ${unit}</title></circle>
+    </g>`).join('')}
   </svg>`;
 }
 
@@ -385,6 +389,22 @@ function records() {
 }
 
 /* ---------- главный экран ---------- */
+/* счётчик статистики: быстрый count-up с easeOutCubic (паттерн живых чисел) */
+function countUp(el, target, fmtFn) {
+  if (reduceMotion.matches || !target) { el.textContent = fmtFn(target); return; }
+  const t0 = performance.now(), dur = 600;
+  const tick = now => {
+    const p = Math.min((now - t0) / dur, 1);
+    el.textContent = fmtFn(target * (1 - Math.pow(1 - p, 3)));
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+const fmtInt = n => fmt(Math.round(n));
+const fmtVol = n => n >= 1000
+  ? (n / 1000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })
+  : fmt(Math.round(n));
+
 function renderHome() {
   const total = S.sessions.length;
   const vol = S.sessions.reduce((a, s) => a + sumVol(s), 0);
@@ -394,10 +414,12 @@ function renderHome() {
     ? `Привет, <b>${esc(S.profile.name)}</b>! 💪` : 'Готов к тренировке? 💪';
 
   $('#homeStats').innerHTML = `
-    <div class="stat"><div class="stat-v">${total}</div><div class="stat-l">тренировок</div></div>
-    <div class="stat"><div class="stat-v">${vol >= 1000 ? (vol / 1000).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) : fmt(vol)}</div>
+    <div class="stat"><div class="stat-v" data-count="${total}" data-kind="int">0</div><div class="stat-l">тренировок</div></div>
+    <div class="stat"><div class="stat-v" data-count="${vol}" data-kind="vol">0</div>
       <div class="stat-l">${vol >= 1000 ? 'тоннаж, т' : 'объём, кг'}</div></div>
-    <div class="stat"><div class="stat-v">${recs.length}</div><div class="stat-l">рекордов</div></div>`;
+    <div class="stat"><div class="stat-v" data-count="${recs.length}" data-kind="int">0</div><div class="stat-l">рекордов</div></div>`;
+  $$('#homeStats .stat-v').forEach(el =>
+    countUp(el, +el.dataset.count, el.dataset.kind === 'vol' ? fmtVol : fmtInt));
 
   const last = S.sessions.slice(-12);
   $('#volumeChart').innerHTML = lineChart(last.map(sumVol), last.map(s => human(s.date)));
@@ -405,7 +427,7 @@ function renderHome() {
   $('#records').innerHTML = recs.length
     ? recs.slice(0, 8).map((r, i) => `
       <div class="rec ${i === 0 ? 'gold' : ''}" style="--i:${i}">
-        <div class="medal">${i === 0 ? '👑' : i + 1}</div>
+        <div class="medal">${i === 0 ? ICONS.crown : i + 1}</div>
         <div class="rec-info">
           <div class="rec-name">${esc(r.name)}</div>
           <div class="rec-date">${human(r.date)} · ${r.reps} повт. · 1RM ≈ ${fmt(r.rm)} кг</div>
@@ -750,8 +772,11 @@ function go(name) {
   $$('.no-anim').forEach(b => b.classList.remove('no-anim')); // вход на экран — с анимацией
   screens.forEach(n => {
     $('#screen-' + n).classList.toggle('active', n === name);
-    $(`.tabbar [data-tab="${n}"]`).classList.toggle('active', n === name);
-    $(`.sidebar [data-tab="${n}"]`)?.classList.toggle('active', n === name);
+    for (const el of [$(`.tabbar [data-tab="${n}"]`), $(`.sidebar [data-tab="${n}"]`)]) {
+      if (!el) continue;
+      el.classList.toggle('active', n === name);
+      n === name ? el.setAttribute('aria-current', 'page') : el.removeAttribute('aria-current');
+    }
   });
   movePill($('.tab-pill'), $(`.tabbar [data-tab="${name}"]`));
   movePill($('.side-pill'), $(`.sidebar [data-tab="${name}"]`));
@@ -767,9 +792,14 @@ const rerender = (boxSel, fn) => { const b = $(boxSel); b.classList.add('no-anim
 function bindEvents() {
   makeSheetDraggable();
 
-  // тап по точке графика — показать значение
+  // Escape закрывает шторку — клавиатурный выход из модального контекста
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape' && $('#sheet').classList.contains('open')) setSheetOpen(false);
+  });
+
+  // тап по точке графика — показать значение (гало делает попадание лёгким)
   document.addEventListener('click', e => {
-    const dot = e.target.closest('.chart .dot');
+    const dot = e.target.closest('.chart .dot-hit, .chart .dot');
     if (dot && dot.dataset.tip) toast(dot.dataset.tip);
   });
 
