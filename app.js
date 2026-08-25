@@ -148,8 +148,53 @@ function toast(msg) {
 const buzz = p => { try { navigator.vibrate && navigator.vibrate(p); } catch {} };
 
 /* ---------- шторка ---------- */
-function sheet(title, fields, onOk, okText = 'Сохранить') {
+/* Пружинная анимация шторки: стартует с текущей экранной позиции, наследует
+   скорость жеста и прерывается в любой момент — как листы в iOS. */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const springRaf = new WeakMap();
+const getY = el => new DOMMatrixReadOnly(getComputedStyle(el).transform).m42;
+
+/* пружина: zeta=1 — критическое демпфирование (без отскока), zeta<1 — отскок;
+   response — время подлёта к цели, с */
+function spring(el, toY, { vel = 0, zeta = 1, response = 0.35, onDone } = {}) {
+  cancelAnimationFrame(springRaf.get(el));
+  if (reduceMotion.matches) {
+    el.style.transform = `translateY(${toY}px)`; el.style.filter = '';
+    return onDone?.();
+  }
+  const k = (2 * Math.PI / response) ** 2, c = 2 * zeta * Math.sqrt(k);
+  let x = getY(el), v = vel, last = performance.now(), lastBlur;
+  const tick = now => {
+    const dt = Math.min((now - last) / 1000, 0.05); last = now;
+    v += (-k * (x - toY) - c * v) * dt;
+    x += v * dt;
+    const done = Math.abs(x - toY) < 0.5 && Math.abs(v) < 30;
+    el.style.transform = `translateY(${done ? toY : x}px)`;
+    /* motion blur: лёгкий расфокус, пропорциональный скорости */
+    const b = done ? 0 : Math.min(Math.round(Math.abs(v) / 600) / 2, 2.5);
+    if (b !== lastBlur) { el.style.filter = b ? `blur(${b}px)` : ''; lastBlur = b; }
+    if (done) return onDone?.();
+    springRaf.set(el, requestAnimationFrame(tick));
+  };
+  springRaf.set(el, requestAnimationFrame(tick));
+}
+
+/* проекция инерции: куда долетит шторка после отпускания (демпфирование iOS ≈ 0.998) */
+const project = v => v > 0 ? (v / 1000) * 0.998 / (1 - 0.998) : 0;
+
+function setSheetOpen(open, vel = 0) {
   const el = $('#sheet'), bd = $('#sheetBackdrop');
+  el.classList.toggle('open', open);
+  bd.classList.toggle('open', open);
+  bd.style.transition = ''; bd.style.opacity = '';
+  const closedY = el.offsetHeight * 1.05 + 12;
+  if (open && getY(el) < closedY) el.style.transform = `translateY(${closedY}px)`;
+  /* отскок — только когда жест нёс инерцию */
+  spring(el, open ? 0 : closedY, { vel, zeta: Math.abs(vel) > 150 ? 0.8 : 1 });
+}
+
+function sheet(title, fields, onOk, okText = 'Сохранить') {
+  const el = $('#sheet');
   el.innerHTML = `<div class="sheet-handle"></div><h3>${title}</h3>
     <form>${fields.map(f => `
       <label class="field"><span>${f.label}</span>
@@ -161,36 +206,34 @@ function sheet(title, fields, onOk, okText = 'Сохранить') {
         <button type="submit" class="btn primary">${okText}</button>
       </div>
     </form>`;
-  const close = () => { el.classList.remove('open'); bd.classList.remove('open'); };
-  el.querySelector('[data-cancel]').onclick = close;
-  bd.onclick = close;
+  el.querySelector('[data-cancel]').onclick = () => setSheetOpen(false);
+  $('#sheetBackdrop').onclick = () => setSheetOpen(false);
   el.querySelector('form').onsubmit = ev => {
     ev.preventDefault();
     const data = Object.fromEntries(new FormData(ev.target).entries());
-    close(); onOk(data);
+    setSheetOpen(false); onOk(data);
   };
-  el.classList.add('open'); bd.classList.add('open');
+  setSheetOpen(true);
   setTimeout(() => el.querySelector('input')?.focus(), 380);
 }
 
 /* ---------- подтверждение (тематическая замена confirm()) ---------- */
 function confirmSheet(text, onYes, yesText = 'Удалить') {
-  const el = $('#sheet'), bd = $('#sheetBackdrop');
+  const el = $('#sheet');
   el.innerHTML = `<div class="sheet-handle"></div><p class="confirm-text">${text}</p>
     <div class="sheet-actions">
       <button type="button" class="btn ghost" data-cancel>Отмена</button>
       <button type="button" class="btn danger" data-yes>${yesText}</button>
     </div>`;
-  const close = () => { el.classList.remove('open'); bd.classList.remove('open'); };
-  el.querySelector('[data-cancel]').onclick = close;
-  bd.onclick = close;
-  el.querySelector('[data-yes]').onclick = () => { close(); onYes(); };
-  el.classList.add('open'); bd.classList.add('open');
+  el.querySelector('[data-cancel]').onclick = () => setSheetOpen(false);
+  $('#sheetBackdrop').onclick = () => setSheetOpen(false);
+  el.querySelector('[data-yes]').onclick = () => { setSheetOpen(false); onYes(); };
+  setSheetOpen(true);
 }
 
 /* ---------- детали тренировки (read-only шторка) ---------- */
 function sessionSheet(s) {
-  const el = $('#sheet'), bd = $('#sheetBackdrop');
+  const el = $('#sheet');
   const byEx = new Map();
   for (const q of s.sets) {
     if (!byEx.has(q.name)) byEx.set(q.name, []);
@@ -214,10 +257,9 @@ function sessionSheet(s) {
     <div class="sheet-actions">
       <button type="button" class="btn ghost" data-cancel>Закрыть</button>
     </div>`;
-  const close = () => { el.classList.remove('open'); bd.classList.remove('open'); };
-  el.querySelector('[data-cancel]').onclick = close;
-  bd.onclick = close;
-  el.classList.add('open'); bd.classList.add('open');
+  el.querySelector('[data-cancel]').onclick = () => setSheetOpen(false);
+  $('#sheetBackdrop').onclick = () => setSheetOpen(false);
+  setSheetOpen(true);
 }
 
 /* ---------- драг шторки: 1:1 за пальцем, velocity, rubber-band ---------- */
@@ -226,14 +268,17 @@ const rubberband = (d, dim = 120, c = 0.55) => (d * dim * c) / (dim + c * Math.a
 
 function makeSheetDraggable() {
   const el = $('#sheet'), bd = $('#sheetBackdrop');
-  let startY = 0, lastY = 0, lastT = 0, vel = 0, dragging = false;
+  let base = 0, startY = 0, lastY = 0, lastT = 0, vel = 0, dragging = false;
 
   el.addEventListener('pointerdown', e => {
     if (e.target.closest('input,button,form,select,textarea,.sheet-scroll')) return;
     dragging = true;
+    base = getY(el); // хватаем шторку там, где она есть — даже на лету
     startY = lastY = e.clientY; lastT = performance.now(); vel = 0;
     el.setPointerCapture(e.pointerId);
-    el.style.transition = 'none'; // на время драга — 1:1 без CSS-transition
+    cancelAnimationFrame(springRaf.get(el)); // жест прерывает пружину
+    el.style.filter = '';
+    bd.style.transition = 'none'; // скрим следует за пальцем без задержки
   });
 
   el.addEventListener('pointermove', e => {
@@ -241,20 +286,19 @@ function makeSheetDraggable() {
     const now = performance.now(), dt = now - lastT;
     if (dt > 0) vel = 0.8 * vel + 0.2 * ((e.clientY - lastY) / dt); // px/ms, сглаженно
     lastY = e.clientY; lastT = now;
-    const dy = e.clientY - startY;
-    // вниз — 1:1 за пальцем, вверх — мягкое сопротивление
-    el.style.transform = `translateY(${dy >= 0 ? dy : -rubberband(-dy)}px)`;
+    const y0 = base + e.clientY - startY;
+    const y = y0 >= 0 ? y0 : -rubberband(-y0); // вниз 1:1, вверх — мягкое сопротивление
+    el.style.transform = `translateY(${y}px)`;
+    bd.style.opacity = String(Math.max(0, 1 - Math.max(0, y) / (el.offsetHeight * 0.9)));
   });
 
   const endDrag = () => {
     if (!dragging) return;
     dragging = false;
-    el.style.transition = '';
-    const dy = lastY - startY;
     if (performance.now() - lastT > 100) vel = 0; // палец замер перед отпусканием — флика нет
-    // решение по скорости: быстрый флик вниз закрывает даже с малого смещения
-    if (vel > 0.5 || dy > 90) { el.classList.remove('open'); bd.classList.remove('open'); }
-    el.style.transform = '';
+    // решение по инерции: быстрый флик вниз закрывает даже с малого смещения
+    const rest = base + lastY - startY + project(vel * 1000);
+    setSheetOpen(!(vel > 0.5 || rest > el.offsetHeight * 0.5), vel * 1000);
     vel = 0;
   };
   el.addEventListener('pointerup', endDrag);
@@ -583,7 +627,7 @@ function renderActive(box) {
 
   $('#sessionName').oninput = e => { a.name = e.target.value; save(); };
   $$('#workoutBox [data-pick]').forEach(c => c.onclick = () => {
-    a.dayId = c.dataset.pick; save(); renderWorkout();
+    a.dayId = c.dataset.pick; save(); rerender('#workoutBox', renderWorkout);
   });
   $$('#workoutBox .set-form').forEach(f => f.onsubmit = ev => {
     ev.preventDefault();
@@ -591,11 +635,11 @@ function renderActive(box) {
     const e = exs.find(x => x.id === f.dataset.ex);
     a.sets.push({ id: uid(), ex: e.id, name: e.name, k: Math.max(1, +fd.get('k') || 1), w: +fd.get('w') || 0, r: +fd.get('r') || 0 });
     pendingFocusEx = e.id;
-    save(); renderWorkout();
+    save(); rerender('#workoutBox', renderWorkout);
   });
   $$('#workoutBox [data-del]').forEach(b => b.onclick = () => {
     a.sets = a.sets.filter(q => q.id !== b.dataset.del);
-    save(); renderWorkout();
+    save(); rerender('#workoutBox', renderWorkout);
   });
   $('#discardBtn').onclick = () => {
     confirmSheet('Отменить тренировку? Введённые подходы не сохранятся.', () => {
@@ -693,16 +737,31 @@ function bindAuth() {
 const screens = ['home', 'analytics', 'schedule', 'workout', 'profile'];
 const render = { home: renderHome, analytics: renderAnalytics, schedule: renderSchedule, workout: renderWorkout, profile: renderProfile };
 
+/* скользящий индикатор активного пункта: перелетает к кнопке, а не прыгает */
+function movePill(pill, btn) {
+  if (!pill || !btn) return;
+  pill.style.opacity = 1;
+  pill.style.width = btn.offsetWidth + 'px';
+  pill.style.height = btn.offsetHeight + 'px';
+  pill.style.transform = `translate(${btn.offsetLeft}px,${btn.offsetTop}px)`;
+}
+
 function go(name) {
+  $$('.no-anim').forEach(b => b.classList.remove('no-anim')); // вход на экран — с анимацией
   screens.forEach(n => {
     $('#screen-' + n).classList.toggle('active', n === name);
     $(`.tabbar [data-tab="${n}"]`).classList.toggle('active', n === name);
     $(`.sidebar [data-tab="${n}"]`)?.classList.toggle('active', n === name);
   });
+  movePill($('.tab-pill'), $(`.tabbar [data-tab="${name}"]`));
+  movePill($('.side-pill'), $(`.sidebar [data-tab="${name}"]`));
   render[name]();
   try { if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name); } catch {}
-  window.scrollTo({ top: 0 });
+  window.scrollTo(0, 0); // экран въезжает сам — скролл наверх без отдельной плавности
 }
+
+/* перерисовка «на месте» (чипсы, подходы) — без повторной анимации входа */
+const rerender = (boxSel, fn) => { const b = $(boxSel); b.classList.add('no-anim'); fn(); };
 
 /* ---------- события ---------- */
 function bindEvents() {
@@ -716,6 +775,11 @@ function bindEvents() {
 
   $$('.tabbar [data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   $$('.sidebar [data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
+  // при ресайзе (поворот, брейкпоинт) пилюля встаёт по активной кнопке
+  addEventListener('resize', () => {
+    movePill($('.tab-pill'), $('.tabbar .tab.active'));
+    movePill($('.side-pill'), $('.sidebar .side-link.active'));
+  });
   addEventListener('hashchange', () => {
     const n = location.hash.slice(1);
     if (screens.includes(n) && !document.body.classList.contains('auth-mode')) go(n);
@@ -729,7 +793,7 @@ function bindEvents() {
   $('#addDayBtn').onclick = () => sheet('Новый день', [{ name: 'name', label: 'Название дня', ph: 'Например: День D — Руки', req: 1 }], d => {
     if (!d.name.trim()) return;
     S.days.push({ id: uid(), name: d.name.trim(), exercises: [] });
-    save(); renderSchedule(); toast('День добавлен');
+    save(); rerender('#daysList', renderSchedule); toast('День добавлен');
   });
 
   $('#daysList').addEventListener('click', ev => {
@@ -742,20 +806,20 @@ function bindEvents() {
       confirmSheet(`Удалить «${d.name}»?`, () => {
         S.days = S.days.filter(x => x !== d);
         if (S.active?.dayId === d.id) S.active = null;
-        save(); renderSchedule();
+        save(); rerender('#daysList', renderSchedule);
       });
     }
     if (act === 'renDay') sheet('Переименовать день', [{ name: 'name', label: 'Название', value: d.name, req: 1 }], r => {
-      d.name = r.name.trim() || d.name; save(); renderSchedule();
+      d.name = r.name.trim() || d.name; save(); rerender('#daysList', renderSchedule);
     });
     if (act === 'addEx') sheet('Новое упражнение', [{ name: 'name', label: 'Упражнение', ph: 'Например: Жим лёжа', req: 1 }], x => {
       if (!x.name.trim()) return;
       d.exercises.push({ id: uid(), name: x.name.trim() });
-      save(); renderSchedule();
+      save(); rerender('#daysList', renderSchedule);
     });
     if (act === 'delEx') {
       d.exercises = d.exercises.filter(x => x.id !== btn.dataset.ex);
-      save(); renderSchedule();
+      save(); rerender('#daysList', renderSchedule);
     }
   });
 
@@ -768,11 +832,11 @@ function bindEvents() {
       if (b.dataset.hist === 'del') {
         confirmSheet(`Удалить тренировку «${s.name || s.dayName}»?`, () => {
           S.sessions = S.sessions.filter(x => x !== s);
-          save(); renderWorkout(); buzz(12); toast('Тренировка удалена');
+          save(); rerender('#workoutBox', renderWorkout); buzz(12); toast('Тренировка удалена');
         });
       } else {
         sheet('Переименовать тренировку', [{ name: 'name', label: 'Название', value: s.name || s.dayName, req: 1 }], r => {
-          s.name = r.name.trim() || s.name; save(); renderWorkout();
+          s.name = r.name.trim() || s.name; save(); rerender('#workoutBox', renderWorkout);
         });
       }
       return;
@@ -787,11 +851,11 @@ function bindEvents() {
   // аналитика: выбор дня, упражнения, показателя; история — детали тренировки
   $('#analyticsBox').addEventListener('click', ev => {
     const dayChip = ev.target.closest('[data-anday]');
-    if (dayChip) { anDayId = dayChip.dataset.anday; anExId = null; renderAnalytics(); return; }
+    if (dayChip) { anDayId = dayChip.dataset.anday; anExId = null; rerender('#analyticsBox', renderAnalytics); return; }
     const exChip = ev.target.closest('[data-anex]');
-    if (exChip) { anExId = exChip.dataset.anex; renderAnalytics(); return; }
+    if (exChip) { anExId = exChip.dataset.anex; rerender('#analyticsBox', renderAnalytics); return; }
     const m = ev.target.closest('[data-anmetric]');
-    if (m) { anMetric = m.dataset.anmetric; renderAnalytics(); return; }
+    if (m) { anMetric = m.dataset.anmetric; rerender('#analyticsBox', renderAnalytics); return; }
     const h = ev.target.closest('[data-session]');
     if (h) {
       const s = S.sessions.find(x => x.id === h.dataset.session);
@@ -806,7 +870,7 @@ function bindEvents() {
     const v = +e.target.value || '';
     if (v && S.weightLog.at(-1)?.v !== v) S.weightLog.push({ d: today(), v });
     S.profile.weight = v;
-    save(); renderProfile();
+    save(); rerender('#screen-profile', renderProfile);
   };
   $('#logoutBtn').onclick = async () => {
     try { await api.call('/logout', 'POST'); } catch {}

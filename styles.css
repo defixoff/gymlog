@@ -17,7 +17,7 @@
   --line:rgba(255,122,26,.16);
   --glow:rgba(255,138,61,.16);
   --shadow:0 8px 28px rgba(214,120,40,.12);
-  --radius:18px;
+  --radius:20px;
   --shine:rgba(255,255,255,.5);
   /* кривые движения: spring — лёгкий overshoot для «живых» элементов,
      swift — быстрое торможение без отскока */
@@ -41,7 +41,6 @@
   color-scheme:dark;
 }
 
-html{scroll-behavior:smooth}
 body{
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   background:var(--bg);color:var(--text);
@@ -67,8 +66,9 @@ body::before{
   border-right:1px solid var(--line);
 }
 .sidebar .brand{font-size:21px}
-.side-nav{display:flex;flex-direction:column;gap:8px;flex:1}
+.side-nav{position:relative;display:flex;flex-direction:column;gap:8px;flex:1}
 .side-link{
+  position:relative;z-index:1;
   display:flex;align-items:center;gap:12px;
   border:0;background:none;cursor:pointer;font-family:inherit;
   padding:12px 14px;border-radius:14px;
@@ -76,12 +76,9 @@ body::before{
   transition:background-color .25s ease,color .25s ease,transform .12s ease;
 }
 .side-link svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.side-link:hover{background:var(--surface2);color:var(--text)}
+.side-link:not(.active):hover{background:var(--surface2);color:var(--text)}
 .side-link:active{transform:scale(.97)}
-.side-link.active{
-  color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-deep));
-  box-shadow:0 6px 16px rgba(255,110,26,.4);
-}
+.side-link.active{color:#fff}
 .side-link.active svg{animation:iconPop .35s var(--spring)}
 .sidebar .icon-btn{width:44px;height:44px}
 
@@ -125,9 +122,15 @@ body::before{
 
 /* ---------- экраны ---------- */
 .screen{display:none;padding-top:6px}
-.screen.active{display:block;animation:screenIn .32s var(--swift)}
-@keyframes screenIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.screen.active{display:block;animation:screenIn .34s var(--swift)}
+/* motion blur: контент въезжает расфокусированным и «ловит резкость» */
+@keyframes screenIn{from{opacity:0;transform:translateY(16px);filter:blur(6px)}to{opacity:1;transform:none;filter:blur(0)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px);filter:blur(4px)}to{opacity:1;transform:none;filter:blur(0)}}
+/* повторная отрисовка «на месте» (чипсы, подходы) — без повторного въезда;
+   класс снимается при входе на экран (go в app.js) */
+.no-anim *{animation:none!important}
+.no-anim .chart .line{stroke-dashoffset:0}
+.no-anim .chart .dot{opacity:1}
 
 h1{font-size:24px;font-weight:800;letter-spacing:-.5px}
 .hello{font-size:26px;margin:6px 0 16px;letter-spacing:-.3px}
@@ -405,19 +408,28 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   box-shadow:0 12px 34px rgba(0,0,0,.14);
   transition:background-color .4s ease;
 }
+/* скользящая «пилюля» активного пункта: перелетает между кнопками,
+   а не прыгает (tabbar и sidebar) */
+.tab-pill,.side-pill{
+  position:absolute;top:0;left:0;pointer-events:none;opacity:0;
+  background:linear-gradient(135deg,var(--accent),var(--accent-deep));
+  box-shadow:0 5px 14px rgba(255,110,26,.42);
+  transition:transform .5s var(--spring),width .5s var(--spring),
+             height .5s var(--spring),opacity .3s ease;
+}
+.tab-pill{border-radius:16px}
+.side-pill{border-radius:14px}
 .tab{
+  position:relative;z-index:1;
   display:flex;flex-direction:column;align-items:center;gap:3px;
   border:0;background:none;cursor:pointer;font-family:inherit;
   padding:8px 10px;border-radius:16px;
   color:var(--muted);font-size:11px;font-weight:700;
-  transition:background-color .28s ease,color .28s ease,transform .15s ease;
+  transition:color .28s ease,transform .15s ease;
 }
 .tab:active{transform:scale(.9)}
 .tab svg{width:22px;height:22px;stroke-width:1.8}
-.tab.active{
-  color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-deep));
-  box-shadow:0 5px 14px rgba(255,110,26,.42);
-}
+.tab.active{color:#fff}
 .tab.active svg{animation:iconPop .35s var(--spring)}
 @keyframes iconPop{from{transform:scale(.6)}to{transform:scale(1)}}
 
@@ -434,10 +446,9 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   padding:14px 20px calc(24px + env(safe-area-inset-bottom));
   box-shadow:0 -12px 40px rgba(0,0,0,.18);
   transform:translateY(105%);
-  transition:transform .3s cubic-bezier(.45,.08,.55,1); /* закрытие: ускорение вниз */
-  will-change:transform;
+  /* transform ведёт spring-анимация из app.js: драг 1:1, инерция, motion blur */
+  will-change:transform,filter;
 }
-.sheet.open{transform:translateY(0);transition:transform .5s var(--spring)} /* открытие: spring с лёгким отскоком */
 .sheet h3{font-size:18px;margin-bottom:16px}
 .sheet-handle{width:44px;height:4px;border-radius:4px;background:var(--line);margin:0 auto 16px}
 .sheet-actions{display:flex;gap:12px;margin-top:8px}
@@ -471,10 +482,10 @@ body.auth-mode .app,body.auth-mode .tabbar,body.auth-mode .sidebar{display:none}
   background:var(--text);color:var(--bg);
   padding:10px 20px;border-radius:999px;
   font-size:14px;font-weight:600;white-space:nowrap;
-  opacity:0;pointer-events:none;
-  transition:transform .4s var(--spring),opacity .22s ease;
+  opacity:0;filter:blur(4px);pointer-events:none;
+  transition:transform .4s var(--spring),opacity .22s ease,filter .3s ease;
 }
-.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.show{opacity:1;filter:blur(0);transform:translateX(-50%) translateY(0)}
 
 @media (max-width:360px){
   .tab{padding:8px 7px;font-size:10px}
@@ -497,8 +508,7 @@ body.auth-mode .app,body.auth-mode .tabbar,body.auth-mode .sidebar{display:none}
   .chart .line,.chart .dot,.chip.on,.tab.active svg,.side-link.active svg{animation:none}
   .chart .line{stroke-dashoffset:0}
   .chart .dot{opacity:1}
-  .sheet,.toast,.tab,.chip,.btn,.icon-btn,.side-link{transition-duration:.01ms!important}
-  html{scroll-behavior:auto}
+  .sheet,.toast,.tab,.chip,.btn,.icon-btn,.side-link,.tab-pill,.side-pill{transition-duration:.01ms!important}
 }
 @media (prefers-reduced-transparency: reduce){
   .topbar{background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
