@@ -162,20 +162,17 @@ const getY = el => new DOMMatrixReadOnly(getComputedStyle(el).transform).m42;
 function spring(el, toY, { vel = 0, zeta = 1, response = 0.35, onDone } = {}) {
   cancelAnimationFrame(springRaf.get(el));
   if (reduceMotion.matches) {
-    el.style.transform = `translateY(${toY}px)`; el.style.filter = '';
+    el.style.transform = `translateY(${toY}px)`;
     return onDone?.();
   }
   const k = (2 * Math.PI / response) ** 2, c = 2 * zeta * Math.sqrt(k);
-  let x = getY(el), v = vel, last = performance.now(), lastBlur;
+  let x = getY(el), v = vel, last = performance.now();
   const tick = now => {
     const dt = Math.min((now - last) / 1000, 0.05); last = now;
     v += (-k * (x - toY) - c * v) * dt;
     x += v * dt;
     const done = Math.abs(x - toY) < 0.5 && Math.abs(v) < 30;
     el.style.transform = `translateY(${done ? toY : x}px)`;
-    /* motion blur: лёгкий расфокус, пропорциональный скорости */
-    const b = done ? 0 : Math.min(Math.round(Math.abs(v) / 600) / 2, 2.5);
-    if (b !== lastBlur) { el.style.filter = b ? `blur(${b}px)` : ''; lastBlur = b; }
     if (done) return onDone?.();
     springRaf.set(el, requestAnimationFrame(tick));
   };
@@ -293,7 +290,6 @@ function makeSheetDraggable() {
     startY = lastY = e.clientY; lastT = performance.now(); vel = 0;
     el.setPointerCapture(e.pointerId);
     cancelAnimationFrame(springRaf.get(el)); // жест прерывает пружину
-    el.style.filter = '';
     bd.style.transition = 'none'; // скрим следует за пальцем без задержки
   });
 
