@@ -22,16 +22,18 @@ const setCount = q => +q.k || 1; // q.k — сколько подходов в �
 const sumVol = s => s.sets.reduce((a, q) => a + setCount(q) * (+q.w || 0) * (+q.r || 0), 0);
 
 const ICONS = {
-  plus : '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
-  x    : '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
-  pen  : '<svg viewBox="0 0 24 24"><path d="M4 20l4-1L20 7l-3-3L5 16l-1 4z"/></svg>',
-  trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>',
-  play : '<svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>',
-  check: '<svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg>',
-  moon : '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>',
-  sun  : '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M19.4 4.6l-1.8 1.8M6.4 17.6l-1.8 1.8"/></svg>',
-  chevron: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
-  crown: '<svg viewBox="0 0 24 24"><path d="M3.5 8.2l4.4 3.6L12 5.6l4.1 6.2 4.4-3.6-1.7 10.2H5.2z"/></svg>',
+  plus : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  x    : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  pen  : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20l4-1L20 7l-3-3L5 16l-1 4z"/></svg>',
+  trash: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg>',
+  play : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>',
+  check: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12l5 5L20 7"/></svg>',
+  moon : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>',
+  sun  : '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M19.4 4.6l-1.8 1.8M6.4 17.6l-1.8 1.8"/></svg>',
+  chevron: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>',
+  crown: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3.5 8.2l4.4 3.6L12 5.6l4.1 6.2 4.4-3.6-1.7 10.2H5.2z"/></svg>',
+  eye  : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>',
+  eyeOff: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-6.5 10-6.5c2 0 3.7.6 5.1 1.4M22 12s-3.5 6.5-10 6.5c-2 0-3.7-.6-5.1-1.4M4 20L20 4"/></svg>',
 };
 
 /* ---------- данные ---------- */
@@ -183,6 +185,8 @@ function spring(el, toY, { vel = 0, zeta = 1, response = 0.35, onDone } = {}) {
 /* проекция инерции: куда долетит шторка после отпускания (демпфирование iOS ≈ 0.998) */
 const project = v => v > 0 ? (v / 1000) * 0.998 / (1 - 0.998) : 0;
 
+let sheetReturnFocus = null; // куда вернуть фокус после закрытия шторки
+
 function setSheetOpen(open, vel = 0) {
   const el = $('#sheet'), bd = $('#sheetBackdrop');
   el.classList.toggle('open', open);
@@ -190,8 +194,19 @@ function setSheetOpen(open, vel = 0) {
   bd.style.transition = ''; bd.style.opacity = '';
   const closedY = el.offsetHeight * 1.05 + 12;
   if (open && getY(el) < closedY) el.style.transform = `translateY(${closedY}px)`;
+  if (open) {
+    sheetReturnFocus = document.activeElement;
+    el.setAttribute('aria-hidden', 'false');
+    /* контейнер фокусируем ( tabindex=-1 ) — фокус виден, но не уводится в фон */
+    setTimeout(() => el.focus({ preventScroll: true }), 60);
+  } else {
+    el.setAttribute('aria-hidden', 'true');
+    if (sheetReturnFocus?.focus && document.contains(sheetReturnFocus))
+      sheetReturnFocus.focus({ preventScroll: true });
+    sheetReturnFocus = null;
+  }
   /* отскок — только когда жест нёс инерцию */
-  spring(el, open ? 0 : closedY, { vel, zeta: Math.abs(vel) > 150 ? 0.8 : 1 });
+  spring(el, open ? 0 : closedY, { vel, zeta: Math.abs(vel) > 150 ? 0.8 : 1, onDone: () => { if (!open) el.style.transform = ''; } });
 }
 
 function sheet(title, fields, onOk, okText = 'Сохранить') {
@@ -411,7 +426,7 @@ function renderHome() {
   const recs = records();
 
   $('#homeHello').innerHTML = S.profile.name
-    ? `Привет, <b>${esc(S.profile.name)}</b>! 💪` : 'Готов к тренировке? 💪';
+    ? `Привет, <b>${esc(S.profile.name)}</b>!` : 'Готов к тренировке?';
 
   $('#homeStats').innerHTML = `
     <div class="stat"><div class="stat-v" data-count="${total}" data-kind="int">0</div><div class="stat-l">тренировок</div></div>
@@ -604,7 +619,7 @@ function renderActive(box) {
                placeholder="Название тренировки" value="${esc(a.name)}" autocomplete="off">
         <div class="hist-sub">${human(a.date)} · тренировка идёт</div>
       </div>
-      <span class="live" title="Идёт тренировка"></span>
+      <span class="live" aria-hidden="true"></span>
     </div>
     <div class="card day-pick">
       <div class="sect-inline">День тренировки</div>
@@ -677,7 +692,7 @@ function renderActive(box) {
     });
     S.active = null; save();
     buzz([12, 40, 18]);
-    toast('Тренировка сохранена 💪');
+    toast('Тренировка сохранена');
     go('home');
   };
 }
@@ -732,6 +747,18 @@ function showAuth() {
 function bindAuth() {
   $('#tabLogin').onclick = () => setAuthMode('login');
   $('#tabReg').onclick = () => setAuthMode('register');
+  // показать/скрыть пароль — контроль над вводом и проверка перед отправкой
+  const eye = $('#passEye'), pass = $('#aPass');
+  eye.innerHTML = ICONS.eye;
+  eye.onclick = () => {
+    const show = pass.type === 'password';
+    pass.type = show ? 'text' : 'password';
+    eye.innerHTML = show ? ICONS.eyeOff : ICONS.eye;
+    eye.classList.toggle('on', show);
+    eye.setAttribute('aria-pressed', String(show));
+    eye.setAttribute('aria-label', show ? 'Скрыть пароль' : 'Показать пароль');
+    pass.focus({ preventScroll: true });
+  };
   $('#authForm').onsubmit = async ev => {
     ev.preventDefault();
     const btn = $('#authSubmit');
@@ -744,8 +771,9 @@ function bindAuth() {
       api.token = data.token;
       localStorage.setItem('gymlog.token', data.token);
       $('#aPass').value = '';
+      if (pass.type === 'text') eye.click(); // вернуть маску после успешного входа
       await enterServer();
-      toast(authMode === 'login' ? 'С возвращением! 💪' : 'Аккаунт создан 🎉');
+      toast(authMode === 'login' ? 'С возвращением!' : 'Аккаунт создан');
     } catch (e) {
       $('#authError').textContent = e.message;
     } finally {
