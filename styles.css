@@ -136,10 +136,26 @@ body::before{
 @keyframes dotPulse{0%,100%{transform:scale(1) rotate(0)}50%{transform:scale(1.25) rotate(90deg)}}
 
 /* ---------- экраны ---------- */
+#screens{position:relative}
 .screen{display:none;padding-top:6px}
-.screen.active{display:block;animation:screenIn .34s var(--swift)}
-/* motion blur: контент въезжает расфокусированным и «ловит резкость» */
-@keyframes screenIn{from{opacity:0;transform:translateY(16px);filter:blur(6px)}to{opacity:1;transform:none;filter:blur(0)}}
+.screen.active{display:block}
+/* переход между вкладками: экраны листаются, как страницы карусели, —
+   новый въезжает со стороны, куда ведёт навигация (по порядку вкладок),
+   старый уезжает следом; расфокус набегает по скорости и «ловит резкость».
+   Классы направлений вешает go() в app.js */
+.screen.entering{position:relative;z-index:1}
+.screen.entering.from-r{animation:pageInR .38s var(--swift) both}
+.screen.entering.from-l{animation:pageInL .38s var(--swift) both}
+.screen.leaving{
+  position:absolute;top:0;left:0;right:0;z-index:0;
+  display:block;pointer-events:none; /* старый экран — фон, клики не ловит */
+}
+.screen.leaving.to-l{animation:pageOutL .3s var(--swift) both} /* выход быстрее входа */
+.screen.leaving.to-r{animation:pageOutR .3s var(--swift) both}
+@keyframes pageInR{from{opacity:0;transform:translateX(26%);filter:blur(10px)}to{opacity:1;transform:none;filter:blur(0)}}
+@keyframes pageInL{from{opacity:0;transform:translateX(-26%);filter:blur(10px)}to{opacity:1;transform:none;filter:blur(0)}}
+@keyframes pageOutL{from{opacity:1;transform:none;filter:blur(0)}to{opacity:.3;transform:translateX(-22%);filter:blur(9px)}}
+@keyframes pageOutR{from{opacity:1;transform:none;filter:blur(0)}to{opacity:.3;transform:translateX(22%);filter:blur(9px)}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px);filter:blur(4px)}to{opacity:1;transform:none;filter:blur(0)}}
 /* повторная отрисовка «на месте» (чипсы, подходы) — без повторного въезда;
    класс снимается при входе на экран (go в app.js) */
@@ -545,11 +561,16 @@ body.auth-mode .app,body.auth-mode .tabbar,body.auth-mode .sidebar{display:none}
 @media (prefers-reduced-motion: reduce){
   .brand-dot,.rec.gold::after,.live::after{animation:none}
   .screen.active,.card,.stat,.hist,.auth-card,.rec,.ex-item,.set-row,.detail-set,
-  .chart .line,.chart .dot-g,.chip.on,.tab.active svg,.side-link.active svg{animation:none}
+  .chart .line,.chart .dot-g,.chip.on,.tab.active svg,.side-link.active svg,
+  .screen.entering,.screen.leaving{animation:none}
+  /* листание вкладок при reduced-motion — мягкий кросс-фейд без перемещений */
+  .screen.entering{animation:rmFade .18s ease both}
+  .screen.leaving{animation:rmFade .18s ease reverse both}
   .chart .line{stroke-dashoffset:0}
   .chart .dot-g{opacity:1}
   .sheet,.toast,.tab,.chip,.btn,.icon-btn,.side-link,.tab-pill,.side-pill,.pass-toggle{transition-duration:.01ms!important}
 }
+@keyframes rmFade{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-transparency: reduce){
   .topbar{background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
   .tabbar{background:var(--surface);backdrop-filter:none;-webkit-backdrop-filter:none}

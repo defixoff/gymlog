@@ -391,6 +391,7 @@ function lineChart(vals, labels = [], unit = 'кг') {
 }
 
 /* ---------- рекорды ---------- */
+/* рекорд = максимальный вес, реально взятый в упражнении за всю историю */
 function records() {
   const map = {};
   for (const s of S.sessions) for (const q of s.sets) {
@@ -399,7 +400,7 @@ function records() {
     map[q.name] = r;
   }
   return Object.entries(map)
-    .map(([name, v]) => ({ name, ...v, rm: Math.round(v.w * (1 + v.reps / 30)) }))
+    .map(([name, v]) => ({ name, ...v }))
     .sort((a, b) => b.w - a.w);
 }
 
@@ -445,7 +446,7 @@ function renderHome() {
         <div class="medal">${i === 0 ? ICONS.crown : i + 1}</div>
         <div class="rec-info">
           <div class="rec-name">${esc(r.name)}</div>
-          <div class="rec-date">${human(r.date)} · ${r.reps} повт. · 1RM ≈ ${fmt(r.rm)} кг</div>
+          <div class="rec-date">${human(r.date)} · ${r.reps} повт.</div>
         </div>
         <div class="rec-val">${fmt(r.w)}<small>кг</small></div>
       </div>`).join('')
@@ -796,10 +797,37 @@ function movePill(pill, btn) {
   pill.style.transform = `translate(${btn.offsetLeft}px,${btn.offsetTop}px)`;
 }
 
+/* переход между вкладками: направленное «пролистывание» с motion blur.
+   Новый экран въезжает со стороны, куда ведёт навигация (по порядку вкладок),
+   старый уезжает следом и растворяется — как листание страниц карусели. */
+let curScreen = null; // текущая вкладка до перехода (для расчёта направления)
+
+function swapScreens(prev, next) {
+  const nextEl = $('#screen-' + next), prevEl = $('#screen-' + prev);
+  if (reduceMotion.matches || !prevEl || prev === next) {
+    // мягкий вариант: без перемещений, только короткий кросс-фейд (см. reduced-motion в CSS)
+    prevEl?.classList.remove('active', 'leaving', 'to-l', 'to-r');
+    nextEl.classList.add('active');
+    return;
+  }
+  const dir = screens.indexOf(next) > screens.indexOf(prev) ? 'r' : 'l';
+  // новый: со стороны направления; старый: уезжает в противоположную
+  nextEl.classList.remove('leaving', 'to-l', 'to-r');
+  nextEl.classList.add('active', 'entering', 'from-' + dir);
+  prevEl.classList.remove('active', 'entering', 'from-r', 'from-l');
+  prevEl.classList.add('leaving', dir === 'r' ? 'to-l' : 'to-r');
+  // после анимаций убрать классы — экраны готовы к следующему переходу
+  setTimeout(() => nextEl.classList.remove('entering', 'from-r', 'from-l'), 420);
+  setTimeout(() => prevEl.classList.remove('leaving', 'to-l', 'to-r'), 340);
+}
+
 function go(name) {
   $$('.no-anim').forEach(b => b.classList.remove('no-anim')); // вход на экран — с анимацией
+  const prev = curScreen && screens.includes(curScreen) ? curScreen : null;
+  if (prev) swapScreens(prev, name);
+  else screens.forEach(n => $('#screen-' + n).classList.toggle('active', n === name)); // первый вход — без листания
+  curScreen = name;
   screens.forEach(n => {
-    $('#screen-' + n).classList.toggle('active', n === name);
     for (const el of [$(`.tabbar [data-tab="${n}"]`), $(`.sidebar [data-tab="${n}"]`)]) {
       if (!el) continue;
       el.classList.toggle('active', n === name);
@@ -810,7 +838,7 @@ function go(name) {
   movePill($('.side-pill'), $(`.sidebar [data-tab="${name}"]`));
   render[name]();
   try { if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name); } catch {}
-  window.scrollTo(0, 0); // экран въезжает сам — скролл наверх без отдельной плавности
+  window.scrollTo(0, 0); // экран листается сам — скролл наверх без отдельной плавности
 }
 
 /* перерисовка «на месте» (чипсы, подходы) — без повторной анимации входа */
