@@ -1,40 +1,33 @@
 /* Vercel serverless: единая точка для всех маршрутов /api/*.
-   Использует PostgreSQL (переменная окружения DATABASE_URL).
-   Таблицы создаются автоматически при первом запросе. */
+   PostgreSQL через DATABASE_URL; таблицы создаются при первом запросе. */
 const core = require('../backend/core.js');
 const dbPostgres = require('../backend/db-postgres.js');
 
 let driver = null;
 
 module.exports = async function handler(req, res) {
-  // Путь разбираем напрямую из req.url, а не из req.query.api: на некоторых
-  // деплоях Vercel сама подстановка динамического catch-all параметра из
-  // имени файла [...api].js в req.query отдаёт param name с лишними точками
-  // ("...api" вместо "api"), из-за чего req.query.api оставался пустым и
-  // все запросы (включая /api/ping) уходили в "Не авторизован".
-  const rawPath = (req.url || '/').split('?')[0]; // отбрасываем query-string
-  const parts = rawPath.replace(/^\/?api\/?/, '').split('/').filter(Boolean);
-  const path = '/api/' + parts.join('/');
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    // путь берём из req.url: req.query.api на части деплоев приходит пустым
+    const rawPath = (req.url || '/').split('?')[0];
+    const parts = rawPath.replace(/^\/?api\/?/, '').split('/').filter(Boolean);
+    const path = '/api/' + parts.join('/');
 
-  // Очищаем путь от возможной косой черты (слэша) на конце
-  const cleanPath = path.replace(/\/$/, ''); 
+    if (req.method === 'GET' && parts[0] === 'ping') return res.status(200).json({ ok: true });
 
-  // Проверка ping теперь защищена от лишних слэшей и параметров
-  if (req.method === 'GET' && (cleanPath === '/api/ping' || parts[0] === 'ping')) {
-    return res.status(200).json({ ok: true });
+    if (!process.env.DATABASE_URL)
+      return res.status(500).json({ error: 'Переменная DATABASE_URL не настроена' });
+    driver ||= dbPostgres.create(process.env.DATABASE_URL);
+
+    // тело: Vercel парсит JSON сам, но при нестандартном content-type отдаёт строку
+    let body = req.body || {};
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+
+    const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const out = await core.handle(driver, { method: req.method, path, body, token });
+    res.status(out.status).json(out.body);
+  } catch (e) {
+    console.error('API error:', e);
+    res.status(500).json({ error: 'Сервер временно недоступен, попробуйте позже' });
   }
-
-  if (!process.env.DATABASE_URL) {
-    return res.status(500).json({ error: 'Переменная DATABASE_URL не настроена' });
-  }
-  driver ||= dbPostgres.create(process.env.DATABASE_URL);
-
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  const out = await core.handle(driver, {
-    method: req.method,
-    path,
-    body: req.body || {},
-    token,
-  });
-  res.status(out.status).json(out.body);
 };

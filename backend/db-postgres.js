@@ -4,7 +4,14 @@
 const { Pool } = require('pg');
 
 function create(connectionString) {
-  const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+  const pool = new Pool({
+    connectionString,
+    ssl: /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false },
+    max: 3,                          // serverless: много инстансов × мало соединений
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 8_000,
+  });
+  pool.on('error', e => console.error('pg pool error:', e.message)); // не роняем процесс
   let ready = null; // таблицы создаются один раз на инстанс
 
   return {
@@ -27,7 +34,8 @@ function create(connectionString) {
           state JSONB NOT NULL,
           updated_at BIGINT NOT NULL
         );
-      `);
+        CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions (expires);
+      `).catch(e => { ready = null; throw e; });
     },
     async getUserByLogin(login) {
       const { rows } = await pool.query('SELECT id, login, pass_hash, salt FROM users WHERE login = $1', [login]);
@@ -50,6 +58,9 @@ function create(connectionString) {
     },
     async deleteSession(token) {
       await pool.query('DELETE FROM sessions WHERE token = $1', [token]);
+    },
+    async purgeSessions(now) {
+      await pool.query('DELETE FROM sessions WHERE expires < $1', [now]);
     },
     async getState(userId) {
       const { rows } = await pool.query('SELECT state FROM states WHERE user_id = $1', [userId]);

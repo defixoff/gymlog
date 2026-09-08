@@ -26,3 +26,7 @@ Thumbs.db
 # Редакторы
 .vscode/
 .idea/
+
+# скриншоты и служебное
+shots/
+*.zip

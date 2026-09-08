@@ -48,6 +48,9 @@ function create(file) {
     async deleteSession(token) {
       db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
     },
+    async purgeSessions(now) {
+      db.prepare('DELETE FROM sessions WHERE expires < ?').run(now);
+    },
     async getState(userId) {
       const row = db.prepare('SELECT state FROM states WHERE user_id = ?').get(userId);
       return row ? JSON.parse(row.state) : null;

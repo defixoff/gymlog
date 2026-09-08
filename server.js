@@ -27,12 +27,19 @@ if (process.env.DATABASE_URL) {
   driver = require('./backend/db-postgres.js').create(process.env.DATABASE_URL);
   dbLabel = 'PostgreSQL (DATABASE_URL)';
 } else {
-  driver = require('./backend/db-sqlite.js')
-    .create(process.env.GYMLOG_DB || path.join(__dirname, 'data', 'gymlog.db'));
-  dbLabel = 'SQLite (data/gymlog.db)';
+  const file = process.env.GYMLOG_DB || path.join(__dirname, 'data', 'gymlog.db');
+  try {
+    driver = require('./backend/db-sqlite.js').create(file);
+    dbLabel = 'SQLite (data/gymlog.db)';
+  } catch (e) {
+    // Node < 22 без node:sqlite — падаем на JSON-файл, чтобы проект запускался везде
+    driver = require('./backend/db-json.js').create(file.replace(/\.db$/, '.json'));
+    dbLabel = 'JSON-файл (data/gymlog.json) — node:sqlite недоступен: ' + e.message.split('\n')[0];
+  }
 }
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = __dirname;
 
 const MIME = {
@@ -42,6 +49,8 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
   '.webmanifest': 'application/manifest+json',
 };
 
@@ -75,15 +84,24 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  /* --- статика --- */
-  const file = path.normalize(path.join(ROOT, url.pathname === '/' ? 'index.html' : url.pathname));
-  if (!file.startsWith(ROOT) || file === ROOT) { res.writeHead(403); return res.end('Forbidden'); }
+  /* --- статика: только белый список расширений, никаких скрытых файлов/данных --- */
+  let rel;
+  try { rel = decodeURIComponent(url.pathname); } catch { res.writeHead(400); return res.end('Bad request'); }
+  if (rel === '/') rel = '/index.html';
+  const file = path.normalize(path.join(ROOT, rel));
+  const segs = path.relative(ROOT, file).split(path.sep);
+  const ext = path.extname(file).toLowerCase();
+  const blocked = !file.startsWith(ROOT + path.sep) || segs.some(s => s.startsWith('.') || s === '..')
+    || ['data', 'backend', 'api', 'node_modules'].includes(segs[0]) || !MIME[ext]
+    || /^(server|test-[a-z]+)\.js$/.test(segs[0]) || segs[0] === 'package.json' || segs[0] === 'package-lock.json';
+  if (blocked) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Not found'); }
   fs.readFile(file, (err, data) => {
     if (err) {
       res.writeHead(err.code === 'ENOENT' || err.code === 'EISDIR' ? 404 : 500, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Not found');
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
+    const cache = ext === '.html' || segs[0] === 'sw.js' ? 'no-cache' : 'public, max-age=3600';
+    res.writeHead(200, { 'Content-Type': MIME[ext], 'Cache-Control': cache, 'X-Content-Type-Options': 'nosniff' });
     res.end(data);
   });
-}).listen(PORT, () => console.log(`GymLog: http://localhost:${PORT}  (база: ${dbLabel})`));
+}).listen(PORT, HOST, () => console.log(`GymLog: http://localhost:${PORT}  (база: ${dbLabel})`));

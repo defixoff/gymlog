@@ -1,0 +1,11 @@
+# Единые концы строк LF в репозитории на любой ОС — без предупреждений
+# «LF will be replaced by CRLF» и без ложных конфликтов слияния
+* text=auto eol=lf
+
+# Бинарники не трогаем
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
+*.db binary
+*.zip binary
