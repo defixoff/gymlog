@@ -103,20 +103,27 @@
 
 </div><!-- /layout -->
 
-<nav class="tabbar" id="tabbar">
-  <!-- строка таймера отдыха, выезжает над табами -->
-  <div class="rest" id="rest" hidden>
-    <svg viewBox="0 0 100 100" aria-hidden="true"><circle class="rest-track" cx="50" cy="50" r="42"/><circle class="rest-prog" id="restProg" cx="50" cy="50" r="42"/></svg>
-    <div class="rest-inner"><div class="rest-time" id="restTime">1:30</div><div class="rest-label">отдых</div></div>
-    <div class="rest-bar"><i id="restBar"></i></div>
+<div class="dock" id="dock">
+  <!-- таймер отдыха: отдельная карточка над вкладками -->
+  <section class="rest" id="rest" hidden aria-live="off">
+    <div class="rest-ring">
+      <svg viewBox="0 0 100 100" aria-hidden="true"><circle class="rest-track" cx="50" cy="50" r="42"/><circle class="rest-prog" id="restProg" cx="50" cy="50" r="42"/></svg>
+      <span class="rest-dot"></span>
+    </div>
+    <div class="rest-mid">
+      <div class="rest-time" id="restTime">1:30</div>
+      <div class="rest-bar"><i id="restBar"></i></div>
+    </div>
     <div class="rest-btns">
       <button type="button" class="rest-btn" data-rest="-15" aria-label="Минус 15 секунд">−15</button>
       <button type="button" class="rest-btn" data-rest="+15" aria-label="Плюс 15 секунд">+15</button>
       <button type="button" class="rest-btn x" data-rest="stop" aria-label="Остановить">✕</button>
     </div>
-  </div>
-  <div class="tabs" id="tabs"><span class="tab-pill" aria-hidden="true"></span></div>
-</nav>
+  </section>
+  <nav class="tabbar" id="tabbar" aria-label="Разделы">
+    <div class="tabs" id="tabs"><span class="tab-pill" aria-hidden="true"></span></div>
+  </nav>
+</div>
 
 <div class="sheet-backdrop" id="sheetBackdrop"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-hidden="true" tabindex="-1"></div>

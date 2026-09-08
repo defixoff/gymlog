@@ -263,7 +263,7 @@ function tilt(els) {
 /* ---------- magnetic hover (мышь): кнопка чуть тянется к курсору ---------- */
 if (matchMedia('(hover:hover) and (pointer:fine)').matches) {
   document.addEventListener('pointermove', e => {
-    const el = e.target.closest('.btn.primary,.tab:not(.active),.side-link:not(.active),.icon-btn');
+    const el = e.target.closest('.btn.primary,.side-link:not(.active),.icon-btn');
     if (!el || reduceMotion.matches) return;
     const r = el.getBoundingClientRect(), dx = (e.clientX - r.left - r.width / 2) / r.width, dy = (e.clientY - r.top - r.height / 2) / r.height;
     el.style.transform = `translate(${dx * 4}px,${dy * 4}px)`;
@@ -1045,15 +1045,18 @@ function bindEvents() {
 
   // Нижний UI (таббар, таймер, тост) прибивается к низу ВИЗУАЛЬНОГО viewport'а.
   // На мобильном Chrome/PWA CSS `bottom` у fixed считается от layout-viewport и уезжает.
+  const dock = $('#dock');
+  let lastTop = -1;
   const pinBottomUI = () => {
-    if (innerWidth >= 900) { $('#tabbar').style.top = ''; $('#toast').style.top = ''; return; }
+    if (innerWidth >= 900) { dock.style.top = ''; $('#toast').style.top = ''; document.documentElement.style.setProperty('--tab-space', '40px'); lastTop = -1; return; }
     const vv = window.visualViewport;
     const h = vv ? vv.height : innerHeight, off = vv ? vv.offsetTop : 0;
-    const tab = $('#tabbar'), tabH = tab.offsetHeight || 66;
+    const dockH = dock.offsetHeight || 66;
     const bottom = off + h - safeProbe.offsetHeight - 12;
-    tab.style.top = (bottom - tabH) + 'px';
-    $('#toast').style.top = (bottom - tabH - 60) + 'px';
-    document.documentElement.style.setProperty('--tab-space', (tabH + 40) + 'px');
+    const top = Math.round(bottom - dockH);
+    if (top !== lastTop) { dock.style.top = top + 'px'; lastTop = top; }
+    $('#toast').style.top = (top - 60) + 'px';
+    document.documentElement.style.setProperty('--tab-space', (dockH + 40) + 'px');
   };
   const safeProbe = document.createElement('div');
   safeProbe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:env(safe-area-inset-bottom);pointer-events:none;visibility:hidden';
@@ -1061,7 +1064,7 @@ function bindEvents() {
   addEventListener('resize', pinBottomUI); addEventListener('orientationchange', () => setTimeout(pinBottomUI, 80));
   if (window.visualViewport) { visualViewport.addEventListener('resize', pinBottomUI); visualViewport.addEventListener('scroll', pinBottomUI); }
   addEventListener('scroll', pinBottomUI, { passive: true });
-  new ResizeObserver(pinBottomUI).observe($('#tabbar')); // таймер выехал/уехал — панель пересчитала top
+  new ResizeObserver(pinBottomUI).observe(dock); // таймер появился/исчез — док пересчитал top
   pinBottomUI(); setTimeout(pinBottomUI, 300); setTimeout(pinBottomUI, 1500);
 
   // клавиатура: только по реальному сжатию визуального viewport (visualViewport),
