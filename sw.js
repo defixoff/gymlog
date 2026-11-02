@@ -1,11 +1,12 @@
 /* GymLog service worker v2 — офлайн для статики, API никогда не кэшируется */
-const CACHE = 'gymlog-v29';
+const CACHE = 'gymlog-v30';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.json',
   './vendor/motion.js', './vendor/confetti.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))); // ждём сигнала SKIP_WAITING от страницы
+  // cache:'reload' — мимо HTTP-кэша, иначе новый SW мог закэшировать старые app.js/styles.css
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))); // ждём сигнала SKIP_WAITING от страницы
 });
 self.addEventListener('message', e => { if (e.data === 'SKIP_WAITING') self.skipWaiting(); });
 self.addEventListener('activate', e => {

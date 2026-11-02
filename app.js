@@ -122,11 +122,12 @@ const api = {
   async ping() {
     for (let i = 0; i < 2; i++) {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 6000);
+      const t = setTimeout(() => ctrl.abort(), 5000);
       try {
         const res = await fetch('/api/ping', { signal: ctrl.signal, cache: 'no-store' });
         if (res.ok) return true;
       } catch {} finally { clearTimeout(t); }
+      if (navigator.onLine === false) break; // офлайн — не ждём второй попытки
     }
     return false;
   },
@@ -262,12 +263,13 @@ function tilt(els) {
 
 /* ---------- magnetic hover (мышь): кнопка чуть тянется к курсору ---------- */
 if (matchMedia('(hover:hover) and (pointer:fine)').matches) {
+  const bound = new WeakSet(); // FIX: раньше на каждый pointermove вешался новый pointerleave-обработчик
   document.addEventListener('pointermove', e => {
     const el = e.target.closest('.btn.primary,.side-link:not(.active),.icon-btn');
     if (!el || reduceMotion.matches) return;
     const r = el.getBoundingClientRect(), dx = (e.clientX - r.left - r.width / 2) / r.width, dy = (e.clientY - r.top - r.height / 2) / r.height;
     el.style.transform = `translate(${dx * 4}px,${dy * 4}px)`;
-    el.addEventListener('pointerleave', () => { el.style.transform = ''; }, { once: true });
+    if (!bound.has(el)) { bound.add(el); el.addEventListener('pointerleave', () => { el.style.transform = ''; }); }
   }, { passive: true });
 }
 
@@ -451,7 +453,7 @@ function barChart(vals, labels = [], unit = 'кг') {
   if (!vals.length) return emptyBox('chart', 'Пока нет данных');
   const w = 340, h = 120, p = 8, bottom = 16, max = Math.max(...vals, 1);
   const bw = Math.min(28, (w - 2 * p) / vals.length - 6), step = (w - 2 * p) / vals.length;
-  const topI = vals.indexOf(Math.max(...vals));
+  const topI = Math.max(...vals) > 0 ? vals.indexOf(Math.max(...vals)) : -1;
   return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img">
     <defs><linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent-deep)"/></linearGradient></defs>
     ${vals.map((v, i) => {
@@ -595,7 +597,8 @@ function renderAnalytics() {
   // все упражнения (включая удалённые из плана, но встречавшиеся в истории)
   const allEx = [...new Set([...S.days.flatMap(d => d.exercises.map(e => e.name)), ...S.sessions.flatMap(s => s.sets.map(q => q.name))])];
   if (!allEx.length) { box.innerHTML = `<div class="screen-head"><h1>Аналитика</h1></div>${emptyBox('chart', 'Добавьте упражнения в расписание —<br>аналитика появится здесь')}`; return; }
-  const day = S.days.find(d => d.id === anDayId) || S.days[0] || null;
+  // FIX: чип «Все» раньше не выбирался — 'all' не находился и подменялся первым днём
+  const day = anDayId === 'all' ? null : (S.days.find(d => d.id === anDayId) || S.days[0] || null);
   anDayId = day?.id || 'all';
   const exList = anDayId === 'all' || !day ? allEx : day.exercises.map(e => e.name);
   const exName = exList.includes(anExId) ? anExId : exList[0];
@@ -610,10 +613,11 @@ function renderAnalytics() {
     const a = metricOf(rows.at(-2)), b = metricOf(rows.at(-1)), d = a ? (b - a) / a * 100 : 0;
     trend = `<span class="trend ${d > 0.5 ? 'up' : d < -0.5 ? 'down' : 'flat'}">${d > 0.5 ? '↑' : d < -0.5 ? '↓' : '→'} ${Math.abs(d).toFixed(0)}%</span>`;
   }
-  // недельный объём (последние 8 недель)
+  // недельный объём: последние 8 недель подряд, включая недели без тренировок (раньше пропуски «склеивались»)
   const weeks = {};
   for (const s of S.sessions) { const d = new Date(s.date + 'T00:00:00'); d.setDate(d.getDate() - (d.getDay() + 6) % 7); const k = localISO(d); weeks[k] = (weeks[k] || 0) + sumVol(s); }
-  const wk = Object.entries(weeks).sort().slice(-8);
+  const mon = new Date(); mon.setHours(0, 0, 0, 0); mon.setDate(mon.getDate() - (mon.getDay() + 6) % 7);
+  const wk = S.sessions.length ? [...Array(8)].map((_, i) => { const d = new Date(mon); d.setDate(mon.getDate() - 7 * (7 - i)); const k = localISO(d); return [k, weeks[k] || 0]; }) : [];
 
   box.innerHTML = `
     <div class="screen-head"><h1>Аналитика</h1></div>
@@ -688,32 +692,73 @@ function renderSchedule() {
   });
   bindExDrag(box);
 }
-/* перетаскивание упражнений внутри дня (pointer events, работает и на тач) */
+/* FLIP: элементы плавно «переезжают» на новое место после изменения DOM */
+const flipAnims = new WeakMap();
+function flip(els, mutate, { duration = 300, easing = 'cubic-bezier(.22,.75,.28,1)' } = {}) {
+  const first = els.map(x => x.getBoundingClientRect().top);
+  mutate();
+  if (reduceMotion.matches) return;
+  els.forEach((x, i) => {
+    flipAnims.get(x)?.cancel();
+    const dy = first[i] - x.getBoundingClientRect().top;
+    if (Math.abs(dy) < 0.5) return;
+    flipAnims.set(x, x.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration, easing }));
+  });
+}
+/* перетаскивание упражнений внутри дня: карточка едет за пальцем, соседи раздвигаются (FLIP),
+   при отпускании — пружинит в слот. Pointer events — работает и на тач, и мышью. */
 function bindExDrag(box) {
-  let drag = null, list = null, ph = null;
   box.querySelectorAll('[data-drag]').forEach(h => h.addEventListener('pointerdown', e => {
-    const item = h.closest('.ex-item'); list = item.parentElement; drag = item;
-    h.setPointerCapture(e.pointerId); item.classList.add('dragging'); buzz(8);
+    if (e.button > 0) return;
+    e.preventDefault();
+    const item = h.closest('.ex-item'), list = item.parentElement;
+    const startY = e.clientY, startTop = item.offsetTop, before = [...list.children].indexOf(item);
+    let lastY = e.clientY, raf = 0, ended = false;
+    const pid = e.pointerId; // слушаем документ, а не capture: перестановка узла в DOM сбрасывает pointer capture
+    flipAnims.get(item)?.cancel();
+    item.classList.add('dragging'); buzz(8);
+    const offset = () => lastY - startY - (item.offsetTop - startTop);
+    const follow = () => { raf = 0; item.style.transform = `translateY(${offset()}px) scale(1.03)`; };
     const move = ev => {
-      const els = [...list.querySelectorAll('.ex-item:not(.dragging)')];
-      els.forEach(x => x.classList.remove('drag-over'));
-      const next = els.find(x => ev.clientY < x.getBoundingClientRect().top + x.offsetHeight / 2);
-      if (next) { next.classList.add('drag-over'); ph = next; } else ph = null;
-      const last = els.at(-1);
-      if (!next && last) { list.appendChild(drag); } else if (next) list.insertBefore(drag, next);
+      if (ev.pointerId !== pid) return;
+      lastY = ev.clientY;
+      const others = [...list.querySelectorAll('.ex-item:not(.dragging)')];
+      const mid = startTop + (lastY - startY) + item.offsetHeight / 2; // центр карточки в координатах раскладки
+      const next = others.find(x => mid < x.offsetTop + x.offsetHeight / 2) || null;
+      if (item.nextElementSibling !== next) {
+        flip(others, () => list.insertBefore(item, next));
+        buzz(4); follow();
+      } else if (!raf) raf = requestAnimationFrame(follow);
     };
-    const up = () => {
-      h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up);
-      list.querySelectorAll('.ex-item').forEach(x => x.classList.remove('dragging', 'drag-over'));
+    const up = ev => {
+      if (ended || (ev && ev.pointerId !== pid)) return; ended = true;
+      cancelAnimationFrame(raf);
+      document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+      const from = offset();
+      item.style.transition = 'none'; // иначе CSS-transition перебьёт пружину (у transitions приоритет выше)
+      item.classList.remove('dragging'); item.style.transform = '';
+      if (!reduceMotion.matches && Math.abs(from) > 0.5) {
+        const a = item.animate([{ transform: `translateY(${from}px) scale(1.03)` }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.3,1.3,.4,1)' });
+        flipAnims.set(item, a); a.finished.catch(() => {}).finally(() => { item.style.transition = ''; });
+      } else item.style.transition = '';
+      if ([...list.children].indexOf(item) === before) return;
       const d = S.days.find(x => x.id === list.closest('.day').dataset.id);
       const order = [...list.querySelectorAll('.ex-item')].map(x => x.dataset.ex);
       d.exercises.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-      save(); rerender(renderSchedule); drag = null;
+      list.querySelectorAll('.ex-n').forEach((n, i) => { n.textContent = i + 1; }); // без перерисовки — анимация не обрывается
+      save();
     };
-    h.addEventListener('pointermove', move); h.addEventListener('pointerup', up);
+    document.addEventListener('pointermove', move); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
   }));
 }
-function removeAnimated(el, done) { el.classList.add('removing'); el.addEventListener('animationend', done, { once: true }); setTimeout(done, 450); }
+/* FIX: done вызывался дважды (animationend + таймер) и мог сработать от анимации дочернего элемента */
+function removeAnimated(el, done) {
+  let fired = false;
+  const once = () => { if (!fired) { fired = true; done(); } };
+  el.classList.add('removing');
+  el.addEventListener('animationend', e => { if (e.target === el) once(); });
+  setTimeout(once, 450);
+}
 
 /* ---------- Тренировка ---------- */
 let pendingFocusEx = null, sessTimerT = null, lastNewSet = null;
@@ -767,7 +812,7 @@ function renderActive(box) {
     ${day ? exs.map((e, ei) => {
         const sets = a.sets.filter(q => q.ex === e.id), prev = lastPerformance(e.name), before = bestBefore(e.name, a.id);
         return `<div class="card ex-card ${sets.length ? 'done-ex' : ''}" style="animation-delay:${ei * .05}s">
-          ${sets.length ? `<span class="done-badge">${ICONS.check}</span>` : ''}
+          ${sets.length ? `<span class="done-badge ${sets.length === 1 && sets[0].id === lastNewSet ? 'fresh' : ''}">${ICONS.check}</span>` : ''}
           <h3>${esc(e.name)}${prev && !sets.length ? `<span class="prev">прошлый раз: ${prev.k}×${fmt(prev.w)}×${prev.r}</span>` : ''}</h3>
           ${sets.length ? `<div class="sets">${sets.map((q, i) => `
             <div class="set-row ${q.id === lastNewSet ? 'new' : ''}"><span class="set-n">${i + 1}</span>
@@ -797,7 +842,7 @@ function renderActive(box) {
 
   $('#sessionName').oninput = e => { a.name = e.target.value; save(); };
   $('#restBtn').onclick = () => startRest();
-  $$('#screen-workout [data-pick]').forEach(c => c.onclick = () => { a.dayId = c.dataset.pick; save(); rerender(renderWorkout); });
+  $$('#screen-workout [data-pick]').forEach(c => c.onclick = () => { a.dayId = c.dataset.pick; save(); rerender(renderWorkout); popFresh(`#screen-workout [data-pick="${c.dataset.pick}"]`); });
   $$('#screen-workout .set-form').forEach(f => f.onsubmit = ev => {
     ev.preventDefault();
     const e = exs.find(x => x.id === f.dataset.ex);
@@ -827,33 +872,56 @@ function renderActive(box) {
   };
 }
 
-/* ---------- таймер отдыха ---------- */
-const rest = { left: 0, total: 0, t: null, end: 0 };
+/* ---------- таймер отдыха ----------
+   Кольцо и полоска рисуются каждый кадр (rAF) от точного времени окончания — без «ступенек»
+   раз в секунду; ±15 с плавно догоняется экспоненциальным сглаживанием. Логика окончания — на
+   интервале, чтобы срабатывать и когда rAF притормаживается в фоне. */
+const rest = { total: 0, t: null, end: 0, raf: 0, p: null, sec: -1, lastFrame: 0, hideT: 0, stopT: 0 };
 const CIRC = 263.9;
-function drawRest() {
+const restMs = () => Math.max(0, rest.end - Date.now());
+function drawRest(now = performance.now()) {
   const el = $('#rest'); if (el.hidden) return;
-  $('#restTime').textContent = `${Math.floor(rest.left / 60)}:${pad2(rest.left % 60)}`;
-  const p = rest.left / Math.max(rest.total, 1);
-  $('#restProg').style.strokeDashoffset = CIRC * (1 - p);
-  $('#restBar').style.transform = `scaleX(${p})`;
-  el.classList.toggle('warn', rest.left <= 5 && rest.left > 0);
+  const ms = restMs(), sec = Math.ceil(ms / 1000);
+  if (sec !== rest.sec) {
+    rest.sec = sec;
+    $('#restTime').textContent = `${Math.floor(sec / 60)}:${pad2(sec % 60)}`;
+    el.classList.toggle('warn', sec <= 5 && sec > 0);
+  }
+  const target = Math.min(1, ms / Math.max(rest.total * 1000, 1));
+  const dt = Math.min(now - (rest.lastFrame || now), 100); rest.lastFrame = now;
+  rest.p = rest.p == null || reduceMotion.matches ? target : target + (rest.p - target) * Math.exp(-dt / 110);
+  $('#restProg').style.strokeDashoffset = (CIRC * (1 - rest.p)).toFixed(2);
+  $('#restBar').style.transform = `scaleX(${rest.p.toFixed(4)})`;
 }
+function restLoop(now) { drawRest(now); if (!$('#rest').hidden) rest.raf = requestAnimationFrame(restLoop); }
 function startRest(sec = S.restSec || 90) {
   const el = $('#rest');
-  rest.total = rest.left = sec; rest.end = Date.now() + sec * 1000;
-  el.hidden = false; el.classList.remove('out', 'warn'); drawRest();
-  clearInterval(rest.t);
+  // FIX: отложенные stopRest/скрытие от предыдущего таймера больше не прячут только что запущенный
+  clearTimeout(rest.hideT); clearTimeout(rest.stopT); clearInterval(rest.t); cancelAnimationFrame(rest.raf);
+  const wasHidden = el.hidden;
+  rest.total = sec; rest.end = Date.now() + sec * 1000; rest.sec = -1; rest.lastFrame = 0;
+  if (wasHidden) rest.p = 1; // при перезапуске кольцо плавно «доливается» до полного
+  el.hidden = false; el.classList.remove('out', 'warn');
+  drawRest(); rest.raf = requestAnimationFrame(restLoop);
   rest.t = setInterval(() => {
-    rest.left = Math.max(0, Math.round((rest.end - Date.now()) / 1000)); drawRest();
-    if (rest.left <= 0) { clearInterval(rest.t); buzz([80, 60, 80, 60, 160]); toast('Отдых окончен — погнали!', '⚡'); setTimeout(stopRest, 700); }
+    if (document.hidden) drawRest();
+    if (restMs() <= 0) {
+      clearInterval(rest.t); buzz([80, 60, 80, 60, 160]); toast('Отдых окончен — погнали!', '⚡');
+      rest.stopT = setTimeout(stopRest, 700);
+    }
   }, 250);
 }
 function stopRest() {
-  clearInterval(rest.t);
+  clearInterval(rest.t); clearTimeout(rest.stopT);
   const el = $('#rest'); if (el.hidden) return;
-  el.classList.add('out'); setTimeout(() => { el.hidden = true; el.classList.remove('out'); }, 350);
+  el.classList.add('out');
+  rest.hideT = setTimeout(() => { el.hidden = true; el.classList.remove('out'); cancelAnimationFrame(rest.raf); rest.p = null; }, 350);
 }
-function adjustRest(d) { rest.left = Math.max(0, rest.left + d); rest.total = Math.max(rest.total, rest.left); rest.end = Date.now() + rest.left * 1000; drawRest(); }
+function adjustRest(d) {
+  const ms = Math.max(0, restMs() + d * 1000);
+  rest.end = Date.now() + ms; rest.total = Math.max(rest.total, Math.ceil(ms / 1000));
+  drawRest();
+}
 
 /* ---------- Профиль ---------- */
 function renderProfile() {
@@ -911,7 +979,8 @@ function renderProfile() {
   $('#importBtn').onclick = () => $('#importFile').click();
   $('#importFile').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
-    try { const s = normState(JSON.parse(await f.text())); if (!s.days) throw 0;
+    e.target.value = ''; // чтобы повторный выбор того же файла снова срабатывал
+    try { const raw = JSON.parse(await f.text()); if (!raw || !Array.isArray(raw.days) || (raw.sessions && !Array.isArray(raw.sessions))) throw 0; const s = normState(raw); // FIX: раньше любой JSON проходил проверку и затирал данные
       confirmSheet('Заменить текущие данные импортированными?', () => { S = s; save(); go('home'); toast('Данные импортированы', '✅'); }, 'Заменить');
     } catch { toast('Не удалось прочитать файл', '❌'); }
   };
@@ -992,8 +1061,9 @@ const NAV = [['home', 'Главная', ICONS.home], ['analytics', 'Аналит
 const render = { home: renderHome, analytics: renderAnalytics, schedule: renderSchedule, workout: renderWorkout, profile: renderProfile };
 let curScreen = null;
 function movePill(pill, btn) { if (!pill || !btn) return; pill.style.opacity = 1; pill.style.width = btn.offsetWidth + 'px'; pill.style.height = btn.offsetHeight + 'px'; pill.style.transform = `translate(${btn.offsetLeft}px,${btn.offsetTop}px)`; }
-function swapScreens(prev, next) {
+function swapScreens(prev, next, { fromX = 0, fromO = 1 } = {}) {
   const nextEl = $('#screen-' + next), prevEl = $('#screen-' + prev);
+  if (prevEl) { prevEl.style.transform = ''; prevEl.style.opacity = ''; prevEl.style.willChange = ''; } // следы свайпа
   if (reduceMotion.matches || !prevEl || prev === next) {
     prevEl?.classList.remove('active', 'leaving', 'to-l', 'to-r'); nextEl.classList.add('active'); return;
   }
@@ -1002,6 +1072,10 @@ function swapScreens(prev, next) {
   const ghost = prevEl.cloneNode(true);
   ghost.id = ''; ghost.className = 'screen ghost leaving ' + (dir === 'r' ? 'to-l' : 'to-r');
   ghost.style.height = prevEl.offsetHeight + 'px';
+  // FIX: снимок стоит там же, где его видел пользователь (раньше при прокрутке он «прыгал» к верху)
+  ghost.style.top = -Math.round(scrollY) + 'px';
+  ghost.style.setProperty('--from-x', fromX + 'px'); ghost.style.setProperty('--from-o', fromO);
+  prevEl.style.transform = ''; prevEl.style.opacity = '';
   ghost.setAttribute('aria-hidden', 'true');
   prevEl.classList.remove('active');
   prevEl.innerHTML = ''; // чистим, чтобы при возврате всё отрисовалось заново с анимациями
@@ -1014,10 +1088,10 @@ function swapScreens(prev, next) {
   nextEl.addEventListener('animationend', function h(e) { if (e.target === nextEl) { nextEl.classList.remove('entering', 'from-r', 'from-l'); nextEl.removeEventListener('animationend', h); } });
   setTimeout(() => nextEl.classList.remove('entering', 'from-r', 'from-l'), 600);
 }
-function go(name) {
+function go(name, opts) {
   $$('.no-anim').forEach(b => b.classList.remove('no-anim'));
   const prev = curScreen && screens.includes(curScreen) ? curScreen : null;
-  if (prev) swapScreens(prev, name); else screens.forEach(n => $('#screen-' + n).classList.toggle('active', n === name));
+  if (prev) swapScreens(prev, name, opts); else screens.forEach(n => $('#screen-' + n).classList.toggle('active', n === name));
   curScreen = name;
   $$('[data-tab]').forEach(el => { const on = el.dataset.tab === name; el.classList.toggle('active', on); on ? el.setAttribute('aria-current', 'page') : el.removeAttribute('aria-current'); });
   movePill($('.tab-pill'), $(`.tabbar [data-tab="${name}"]`)); movePill($('.side-pill'), $(`.sidebar [data-tab="${name}"]`));
@@ -1027,6 +1101,8 @@ function go(name) {
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
 const rerender = fn => { $('#screen-' + curScreen).classList.add('no-anim'); fn(); updateBadges(); updateChips(); };
+/* после перерисовки «без анимаций» точечно проигрываем отклик на выбранном чипе */
+const popFresh = sel => { const el = sel && $(sel); if (el) { el.classList.remove('fresh'); void el.offsetWidth; el.classList.add('fresh'); } };
 function updateBadges() {
   $$('[data-tab="workout"] .badge').forEach(b => b.remove());
   if (S.active) $$('[data-tab="workout"]').forEach(b => b.insertAdjacentHTML('beforeend', '<span class="badge"></span>'));
@@ -1063,7 +1139,8 @@ function bindEvents() {
   document.body.appendChild(safeProbe);
   addEventListener('resize', pinBottomUI); addEventListener('orientationchange', () => setTimeout(pinBottomUI, 80));
   if (window.visualViewport) { visualViewport.addEventListener('resize', pinBottomUI); visualViewport.addEventListener('scroll', pinBottomUI); }
-  addEventListener('scroll', pinBottomUI, { passive: true });
+  let pinRaf = 0; // скролл: не чаще раза за кадр (раньше — принудительный layout на каждое событие)
+  addEventListener('scroll', () => { if (!pinRaf) pinRaf = requestAnimationFrame(() => { pinRaf = 0; pinBottomUI(); }); }, { passive: true });
   new ResizeObserver(pinBottomUI).observe(dock); // таймер появился/исчез — док пересчитал top
   pinBottomUI(); setTimeout(pinBottomUI, 300); setTimeout(pinBottomUI, 1500);
 
@@ -1077,6 +1154,58 @@ function bindEvents() {
     });
     addEventListener('orientationchange', () => setTimeout(() => { baseH = visualViewport.height; document.body.classList.remove('kb-open'); }, 300));
   }
+
+  // свайп между вкладками: экран едет за пальцем, на краях — «резинка»;
+  // отпустили — либо переход (с той же позиции, без рывка), либо пружина назад
+  (function swipeNav() {
+    const main = $('#screens');
+    let g = null;
+    const blocked = t => t.closest('.chips,input,textarea,select,[data-drag],.set-form,.icon-btn');
+    const springBack = () => {
+      const { el, shown } = g; const o = el.style.opacity || 1;
+      el.style.transform = ''; el.style.opacity = ''; el.style.willChange = '';
+      if (shown && !reduceMotion.matches) el.animate([{ transform: `translateX(${shown}px)`, opacity: o }, { transform: 'none', opacity: 1 }], { duration: 460, easing: 'cubic-bezier(.3,1.25,.4,1)' });
+    };
+    main.addEventListener('touchstart', e => {
+      g = null;
+      if (innerWidth >= 900 || e.touches.length !== 1 || document.body.classList.contains('kb-open') || $('#sheet').classList.contains('open')) return;
+      const t = e.touches[0], el = $('#screen-' + curScreen);
+      if (t.clientX < 24 || t.clientX > innerWidth - 24 || blocked(e.target)) return; // у краёв — системный жест «назад»
+      if (!el || el.classList.contains('entering')) return;
+      g = { el, x: t.clientX, y: t.clientY, lx: t.clientX, lt: performance.now(), vx: 0, dx: 0, shown: 0, lock: null };
+    }, { passive: true });
+    main.addEventListener('touchmove', e => {
+      if (!g) return;
+      const t = e.touches[0], dx = t.clientX - g.x, dy = t.clientY - g.y;
+      if (!g.lock) {
+        if (Math.hypot(dx, dy) < 10) return;
+        g.lock = Math.abs(dx) > Math.abs(dy) * 1.4 ? 'x' : 'y';
+        if (g.lock === 'x') g.el.style.willChange = 'transform,opacity';
+      }
+      if (g.lock !== 'x') return;
+      const now = performance.now();
+      if (now > g.lt) g.vx = 0.7 * g.vx + 0.3 * (t.clientX - g.lx) / (now - g.lt);
+      g.lt = now; g.lx = t.clientX; g.dx = dx;
+      const i = screens.indexOf(curScreen), edge = (dx > 0 && i === 0) || (dx < 0 && i === screens.length - 1);
+      g.shown = edge ? Math.sign(dx) * rubberband(Math.abs(dx) / 2) : dx * 0.6;
+      if (reduceMotion.matches) return;
+      g.el.style.transform = `translateX(${g.shown.toFixed(1)}px)`;
+      g.el.style.opacity = (1 - Math.min(Math.abs(g.shown) / innerWidth, .5) * .7).toFixed(3);
+    }, { passive: true });
+    const end = () => {
+      if (!g) return;
+      if (g.lock !== 'x') { g = null; return; }
+      const i = screens.indexOf(curScreen), ni = i + (g.dx < 0 ? 1 : -1);
+      if (performance.now() - g.lt > 90) g.vx = 0; // палец остановился перед отпусканием
+      const commit = ni >= 0 && ni < screens.length &&
+        (Math.abs(g.dx) > innerWidth * 0.3 || (Math.abs(g.dx) > 40 && Math.abs(g.vx) > 0.35 && Math.sign(g.vx) === Math.sign(g.dx)));
+      if (commit) { buzz(6); go(screens[ni], { fromX: reduceMotion.matches ? 0 : g.shown, fromO: g.el.style.opacity || 1 }); }
+      else springBack();
+      g = null;
+    };
+    main.addEventListener('touchend', end, { passive: true });
+    main.addEventListener('touchcancel', end, { passive: true });
+  })();
 
   // таймер отдыха
   $$('#rest [data-rest]').forEach(b => b.onclick = () => { const v = b.dataset.rest; if (v === 'stop') stopRest(); else adjustRest(+v); buzz(6); });
@@ -1109,9 +1238,9 @@ function bindEvents() {
   });
   // аналитика
   $('#screen-analytics').addEventListener('click', ev => {
-    const dc = ev.target.closest('[data-anday]'); if (dc) { anDayId = dc.dataset.anday; anExId = null; rerender(renderAnalytics); return; }
-    const ec = ev.target.closest('[data-anex]'); if (ec) { anExId = ec.dataset.anex; rerender(renderAnalytics); return; }
-    const m = ev.target.closest('[data-anmetric]'); if (m) { anMetric = m.dataset.anmetric; rerender(renderAnalytics); return; }
+    const dc = ev.target.closest('[data-anday]'); if (dc) { anDayId = dc.dataset.anday; anExId = null; rerender(renderAnalytics); popFresh(`#screen-analytics [data-anday="${CSS.escape(anDayId)}"]`); return; }
+    const ec = ev.target.closest('[data-anex]'); if (ec) { anExId = ec.dataset.anex; rerender(renderAnalytics); popFresh(`#screen-analytics [data-anex="${CSS.escape(anExId)}"]`); return; }
+    const m = ev.target.closest('[data-anmetric]'); if (m) { anMetric = m.dataset.anmetric; rerender(renderAnalytics); popFresh(`#screen-analytics [data-anmetric="${anMetric}"]`); return; }
     const h = ev.target.closest('[data-session]'); if (h) { const s = S.sessions.find(x => x.id === h.dataset.session); if (s) sessionSheet(s); }
   });
 }
